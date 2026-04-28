@@ -160,6 +160,35 @@ $ docker run --net=mynet -itd --name=web nginx
 4. privileged - indicating privileged network that can sniff packets, and modify L2 addresses
 5. prefix - prefix of the interface name within the container (default: "eth")
 
+### ARM64 image build helper
+
+The repository also ships `./build-arm64-host.sh` for building an `aarch64`
+plugin image from either an `x86_64` host or an `aarch64` host.
+
+On `x86_64`, the helper script cross-compiles the binary and then packages the
+ARM64 runtime image.
+
+On `aarch64`, the same helper still works, but the `GOARCH=arm64` build step is
+effectively a native build instead of a cross-compile.
+
+The helper script does the following:
+
+1. fetches the Go dependencies into a temporary `GOPATH`
+2. cross-compiles the plugin with `GOOS=linux GOARCH=arm64`
+3. loads `debian_stretch-slim_aarch64.tar` when the local ARM64 runtime image
+   is missing
+4. packages the final image with `docker buildx build --platform linux/arm64`
+
+Quick examples:
+
+```
+./build-arm64-host.sh
+./build-arm64-host.sh --dry-run
+IMAGE_TAG=rdma/sriov-plugin:arm64-test ./build-arm64-host.sh
+```
+
+脚本运行不影响机器环境变量
+
 ### Limitations
 
 It supported on Linux environment on x86_64 and ppc64le platforms.
