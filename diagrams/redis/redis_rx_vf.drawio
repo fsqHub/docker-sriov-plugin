@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="VF Passthrough RX Path">
+    <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1000" pageHeight="1200">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="&lt;b&gt;VF 直通模式 - Redis 数据接收路径&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="50" y="20" width="600" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- VF Hardware Layer -->
+        <mxCell id="hw_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="100" y="80" width="500" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="hw_label" value="&lt;b&gt;物理层 - VF 硬件&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=14;fontColor=#2e7d32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="90" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hw1" value="VF 硬件队列&#xa;（独立 RX 描述符环）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#388e3c;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="130" width="180" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="hw2" value="&lt;b&gt;DMA 到 VF 驱动的内核 RX buffer&lt;/b&gt;&#xa;（IOMMU 地址隔离）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c5e1a5;strokeColor=#558b2f;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="330" y="130" width="220" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="hw3" value="VF 独立中断&#xa;（MSI-X）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#388e3c;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="180" width="180" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hw_note" value="✓ 不经过宿主机 netns" style="text;html=1;align=right;verticalAlign=bottom;whiteSpace=wrap;fontSize=10;fontColor=#2e7d32;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="350" y="185" width="200" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Container netns -->
+        <mxCell id="cont_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="100" y="260" width="500" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="cont_label" value="&lt;b&gt;内核态 - 容器 netns&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=14;fontColor=#1565c0;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="270" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="cont1" value="VF 中断处理&#xa;NAPI 软中断" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="310" width="180" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="cont2" value="&lt;b&gt;ixgbevf_poll()&lt;/b&gt;&#xa;VF 驱动" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="330" y="310" width="220" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="cont3" value="ixgbevf_clean_rx_irq()&#xa;从 VF RX 环读取数据" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="370" width="420" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="cont4" value="TCP/IP 协议栈处理&#xa;（在容器 netns 中）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="430" width="420" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- User Space -->
+        <mxCell id="user_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="100" y="540" width="500" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="user_label" value="&lt;b&gt;用户态 - Redis 进程&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=14;fontColor=#e65100;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="550" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="user1" value="&lt;b&gt;epoll_wait() 返回&lt;/b&gt;&#xa;系统调用返回" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#e65100;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="590" width="180" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="user2" value="&lt;b&gt;read() 系统调用&lt;/b&gt;&#xa;内核→用户态拷贝" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#e65100;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="330" y="590" width="220" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="user3" value="readQueryFromClient()&#xa;RESP 协议解析 → 命令执行" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#e65100;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="650" width="420" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows -->
+        <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#82b366;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="hw_box" target="cont_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow1_label" value="DMA 直通" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#2e7d32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="360" y="225" width="80" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#6c8ebf;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="cont_box" target="user_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Performance Advantages -->
+        <mxCell id="perf_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#4caf50;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="100" y="760" width="500" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="perf_title" value="&lt;b&gt;性能优势&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;fontColor=#2e7d32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="770" width="100" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="perf1" value="✓ 省去虚拟交换/软件转发层，&lt;b&gt;不经过宿主机 netns&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="805" width="350" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="perf2" value="✓ 协议栈遍历 &lt;b&gt;1 次&lt;/b&gt;（在容器 netns）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="830" width="300" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="perf3" value="✓ 独立的硬件队列、中断向量（&lt;b&gt;硬件级隔离&lt;/b&gt;）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="855" width="350" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="perf4" value="✓ 完整的硬件卸载支持（RSS、Checksum Offload、VLAN 过滤）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="880" width="440" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="perf5" value="✗ IOMMU 地址转换开销（1-3%）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#666;" vertex="1" parent="1">
+          <mxGeometry x="130" y="905" width="300" height="20" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Socket FD Lifecycle">
+    <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1200" pageHeight="900">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="&lt;b&gt;Redis Socket 文件描述符生命周期&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="100" y="20" width="800" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- State 1: Server Init -->
+        <mxCell id="state1" value="&lt;b&gt;服务器初始化&lt;/b&gt;&#xa;socket() + bind() + listen()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="100" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="listen_fd" value="&lt;b&gt;listen_fd&lt;/b&gt; (例如: fd=6)&#xa;监听端口 6379" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#388e3c;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="170" y="190" width="160" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- State 2: Register epoll -->
+        <mxCell id="state2" value="&lt;b&gt;注册到 epoll&lt;/b&gt;&#xa;aeCreateFileEvent()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="450" y="100" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="epoll1" value="epoll_ctl(epfd, EPOLL_CTL_ADD,&#xa;listen_fd, EPOLLIN)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#e65100;fontSize=10;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="450" y="190" width="220" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow 1->2 -->
+        <mxCell id="arrow1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="state1" target="state2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow1_label" value="初始化完成" style="text;html=1;align=center;verticalAlign=bottom;whiteSpace=wrap;fontSize=10;fontColor=#666;" vertex="1" parent="1">
+          <mxGeometry x="360" y="110" width="80" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- State 3: Wait -->
+        <mxCell id="state3" value="&lt;b&gt;等待连接&lt;/b&gt;&#xa;epoll_wait()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="750" y="100" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="wait" value="阻塞等待可读事件" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#6a1b9a;" vertex="1" parent="1">
+          <mxGeometry x="770" y="190" width="160" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow 2->3 -->
+        <mxCell id="arrow2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="state2" target="state3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- State 4: Accept -->
+        <mxCell id="state4" value="&lt;b&gt;接受连接&lt;/b&gt;&#xa;acceptTcpHandler()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="450" y="320" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="accept" value="client_fd = accept4(listen_fd,&#xa;..., SOCK_NONBLOCK)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=10;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="430" y="410" width="240" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow 3->4 -->
+        <mxCell id="arrow3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666;exitX=0.5;exitY=1;entryX=1;entryY=0.5;" edge="1" parent="1" source="state3" target="state4">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="850" y="250" />
+              <mxPoint x="700" y="250" />
+              <mxPoint x="700" y="350" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="arrow3_label" value="客户端连接到达&#xa;(EPOLLIN 触发)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#666;" vertex="1" parent="1">
+          <mxGeometry x="710" y="260" width="120" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- State 5: Create Client -->
+        <mxCell id="state5" value="&lt;b&gt;创建客户端对象&lt;/b&gt;&#xa;createClient()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="320" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="client" value="client-&gt;fd = client_fd&#xa;client-&gt;querybuf = sdsempty()&#xa;client-&gt;reply = listCreate()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#d6b656;fontSize=10;fontFamily=Courier New;align=left;" vertex="1" parent="1">
+          <mxGeometry x="130" y="410" width="240" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow 4->5 -->
+        <mxCell id="arrow4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="state4" target="state5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow4_label" value="accept 成功" style="text;html=1;align=center;verticalAlign=bottom;whiteSpace=wrap;fontSize=10;fontColor=#666;" vertex="1" parent="1">
+          <mxGeometry x="360" y="330" width="80" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- State 6: Register client -->
+        <mxCell id="state6" value="&lt;b&gt;注册客户端 fd&lt;/b&gt;&#xa;connSetReadHandler()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#e65100;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="520" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="epoll2" value="epoll_ctl(epfd, EPOLL_CTL_ADD,&#xa;client_fd, EPOLLIN)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#e65100;fontSize=10;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="130" y="610" width="240" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow 5->6 -->
+        <mxCell id="arrow5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="state5" target="state6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- State 7: Read/Write Loop -->
+        <mxCell id="state7_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999;strokeWidth=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="510" width="520" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="state7_label" value="&lt;b&gt;读写循环&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;fontColor=#666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="440" y="520" width="100" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="read_event" value="&lt;b&gt;可读事件&lt;/b&gt;&#xa;readQueryFromClient()&#xa;→ read() → 协议解析" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="440" y="560" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="write_event" value="&lt;b&gt;可写事件&lt;/b&gt;&#xa;sendReplyToClient()&#xa;→ write/writev()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#388e3c;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="700" y="560" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="loop_note" value="根据 epoll_wait() 返回的事件类型&#xa;调用对应的处理函数" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#666;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="530" y="640" width="300" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow 6->7 -->
+        <mxCell id="arrow6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="state6" target="read_event">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- State 8: Close -->
+        <mxCell id="state8" value="&lt;b&gt;关闭连接&lt;/b&gt;&#xa;freeClient()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="450" y="740" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="close" value="epoll_ctl(epfd, EPOLL_CTL_DEL,&#xa;client_fd, ...)&#xa;close(client_fd)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffccbc;strokeColor=#bf360c;fontSize=10;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="430" y="820" width="240" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow 7->8 -->
+        <mxCell id="arrow7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="state7_box" target="state8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow7_label" value="客户端断开&#xa;或出错" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#666;" vertex="1" parent="1">
+          <mxGeometry x="700" y="700" width="80" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Loop arrow 3 back -->
+        <mxCell id="loop_arrow" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#999;dashed=1;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="state3" target="state3">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1000" y="130" />
+              <mxPoint x="1000" y="130" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="loop_label" value="继续等待&#xa;新连接" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=9;fontColor=#999;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="115" width="60" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Summary -->
+        <mxCell id="summary_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#4caf50;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="100" y="920" width="840" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="summary_title" value="&lt;b&gt;关键点&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;fontColor=#2e7d32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="930" width="80" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="sum1" value="✓ listen_fd 始终存在，监听新连接" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="140" y="960" width="300" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="sum2" value="✓ 每个客户端连接对应一个 client_fd，独立管理" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="460" y="960" width="360" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="sum3" value="✓ 所有 fd 通过 epoll 统一管理，事件驱动处理" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="140" y="985" width="360" height="20" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

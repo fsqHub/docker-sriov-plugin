@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="SR-IOV Hardware Architecture">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="&lt;b&gt;SR-IOV 硬件架构：PF 与 VF 的关系&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="200" y="20" width="800" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Physical NIC Card Box -->
+        <mxCell id="nic_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1f5e1;strokeColor=#82b366;strokeWidth=3;" vertex="1" parent="1">
+          <mxGeometry x="100" y="100" width="1000" height="700" as="geometry" />
+        </mxCell>
+        <mxCell id="nic_label" value="&lt;b&gt;物理网卡（Intel 82599 / X710）&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=14;fontColor=#2e7d32;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="110" width="300" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- PF (Physical Function) -->
+        <mxCell id="pf_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff4e6;strokeColor=#d79b00;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="150" y="170" width="350" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="pf_title" value="&lt;b&gt;Physical Function (PF)&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="175" width="350" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- PF Components -->
+        <mxCell id="pf_queues" value="&lt;b&gt;TX/RX 队列 (64 个)&lt;/b&gt;&#xa;queue_0 ~ queue_63" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="170" y="220" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pf_msix" value="&lt;b&gt;MSI-X 中断&lt;/b&gt;&#xa;vector_0 ~ 63" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="220" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pf_regs" value="&lt;b&gt;PF 配置寄存器&lt;/b&gt;&#xa;TDBAL/TDBAH&#xa;RDBAL/RDBAH&#xa;管理 VF 资源" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="170" y="300" width="310" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- VF (Virtual Functions) -->
+        <mxCell id="vf_container" value="&lt;b&gt;Virtual Functions (VF)&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=13;fontColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="400" width="900" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- VF 0 -->
+        <mxCell id="vf0_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="150" y="450" width="250" height="310" as="geometry" />
+        </mxCell>
+        <mxCell id="vf0_title" value="&lt;b&gt;VF 0 (容器 A)&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#1565c0;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="455" width="250" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="vf0_bdf" value="BDF: 03:10.0" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#666;" vertex="1" parent="1">
+          <mxGeometry x="150" y="480" width="250" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="vf0_queue" value="&lt;b&gt;独立 TX/RX 队列 (4)&lt;/b&gt;&#xa;VFTDBAL_0/1/2/3&#xa;VFRDBAL_0/1/2/3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="170" y="510" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="vf0_msix" value="&lt;b&gt;独立 MSI-X 中断&lt;/b&gt;&#xa;vector_0 ~ 3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="170" y="590" width="210" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="vf0_mac" value="&lt;b&gt;独立 MAC&lt;/b&gt;&#xa;02:42:ac:11:00:02" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="170" y="660" width="210" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="vf0_vlan" value="&lt;b&gt;VLAN 过滤&lt;/b&gt;&#xa;VLAN ID: 100" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="170" y="720" width="210" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- VF 1 -->
+        <mxCell id="vf1_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="430" y="450" width="250" height="310" as="geometry" />
+        </mxCell>
+        <mxCell id="vf1_title" value="&lt;b&gt;VF 1 (容器 B)&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#1565c0;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="430" y="455" width="250" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="vf1_bdf" value="BDF: 03:10.1" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#666;" vertex="1" parent="1">
+          <mxGeometry x="430" y="480" width="250" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="vf1_queue" value="&lt;b&gt;独立 TX/RX 队列 (4)&lt;/b&gt;&#xa;VFTDBAL_0/1/2/3&#xa;VFRDBAL_0/1/2/3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="450" y="510" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="vf1_msix" value="&lt;b&gt;独立 MSI-X 中断&lt;/b&gt;&#xa;vector_4 ~ 7" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="450" y="590" width="210" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="vf1_mac" value="&lt;b&gt;独立 MAC&lt;/b&gt;&#xa;02:42:ac:11:00:03" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="450" y="660" width="210" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="vf1_vlan" value="&lt;b&gt;VLAN 过滤&lt;/b&gt;&#xa;VLAN ID: 200" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="450" y="720" width="210" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- VF 2 (more VFs indicator) -->
+        <mxCell id="vf2_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#999999;strokeWidth=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="710" y="450" width="250" height="310" as="geometry" />
+        </mxCell>
+        <mxCell id="vf2_title" value="&lt;b&gt;VF 2 ~ VF 63&lt;/b&gt;&#xa;(最多 64 个 VF)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#666;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="710" y="590" width="250" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="vf2_note" value="每个 VF：&#xa;• 独立 BDF&#xa;• 独立硬件队列&#xa;• 独立中断向量&#xa;• 独立 MAC/VLAN" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;fontColor=#666;" vertex="1" parent="1">
+          <mxGeometry x="730" y="650" width="210" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- PCIe Port -->
+        <mxCell id="pcie_port" value="&lt;b&gt;PCIe 物理端口&lt;/b&gt;&#xa;共享物理线路" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;arcSize=50;" vertex="1" parent="1">
+          <mxGeometry x="400" y="850" width="400" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows from VFs to PCIe -->
+        <mxCell id="arrow_vf0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#6c8ebf;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="vf0_box" target="pcie_port">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow_vf1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#6c8ebf;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="vf1_box" target="pcie_port">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow_vf2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#999999;dashed=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.8;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="vf2_box" target="pcie_port">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- PF management arrow -->
+        <mxCell id="arrow_pf_mgmt" value="PF 管理 VF 资源" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;fontSize=11;fontColor=#d79b00;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="pf_box" target="vf_container">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="325" y="380" as="sourcePoint" />
+            <mxPoint x="600" y="430" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Key Points Box -->
+        <mxCell id="key_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e6;strokeColor=#d6b656;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="100" y="950" width="1000" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="key_title" value="&lt;b&gt;关键特性&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=14;fontColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="960" width="100" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Key point 1 -->
+        <mxCell id="key1_icon" value="✓" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="130" y="1000" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="key1_text" value="&lt;b&gt;硬件级并行：&lt;/b&gt;PF 和所有 VF 共享物理端口，但各自拥有独立的硬件队列、DMA 引擎、中断向量，网卡芯片通过硬件调度器公平分配 PCIe 带宽" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="170" y="1000" width="900" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Key point 2 -->
+        <mxCell id="key2_icon" value="✓" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="130" y="1045" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="key2_text" value="&lt;b&gt;独立 BDF 识别：&lt;/b&gt;每个 VF 通过唯一的 Bus/Device/Function 在 PCIe 配置空间中独立存在，操作系统和 IOMMU 将其识别为独立的 PCI 设备" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="170" y="1045" width="900" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Key point 3 -->
+        <mxCell id="key3_icon" value="✓" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="130" y="1090" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="key3_text" value="&lt;b&gt;PF 强制隔离：&lt;/b&gt;PF 驱动通过写入 VF 专属寄存器配置 MAC/VLAN/带宽限制，这些策略由网卡硬件芯片强制执行，VF 驱动无法绕过（硬件级防火墙）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="170" y="1090" width="900" height="30" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
