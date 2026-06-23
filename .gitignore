@@ -6,3 +6,6 @@ ipvlan与vf.md
 .gitignore
 .$network_modes_comparison.drawio.bkp
 .dockerignore
+Dockerfile
+REDIS_ANALYSIS_COMPLETE.md
+容器网络模式对比分析-old.pdf

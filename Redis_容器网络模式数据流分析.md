@@ -128,7 +128,85 @@ struct client {
   - 优先使用固定大小的快速缓冲区（`buf`，16KB，在 `createClient()` 中一次性分配）
   - 溢出时使用链表（`reply`）存储大响应
 
-### 1.5 Redis 事件循环架构图
+### 1.5 内核网络栈中的 skb（socket buffer）
+
+在理解容器网络模式的数据流之前，需要先了解 Linux 内核网络栈的核心数据结构 **skb (socket buffer)**。
+
+#### 什么是 skb
+
+`struct sk_buff`（简称 skb）是 Linux 内核中网络数据包的统一表示，贯穿整个网络栈（从网卡驱动到应用层 socket）。
+
+**源码位置**：`include/linux/skbuff.h`
+
+```c
+struct sk_buff {
+    struct sk_buff      *next;        // 链表指针（用于队列）
+    struct sk_buff      *prev;
+    
+    struct net_device   *dev;         // 关联的网络设备
+    struct sock         *sk;          // 关联的 socket
+    
+    unsigned char       *head;        // 数据区起始
+    unsigned char       *data;        // 当前数据指针
+    unsigned char       *tail;        // 数据尾部
+    unsigned char       *end;         // 数据区结束
+    
+    unsigned int        len;          // 数据长度
+    unsigned int        data_len;     // 分片数据长度
+    
+    // 协议相关
+    __be16              protocol;     // 协议类型（如 ETH_P_IP）
+    __u16               transport_header;  // 传输层头偏移
+    __u16               network_header;    // 网络层头偏移
+    __u16               mac_header;        // MAC 层头偏移
+    
+    // ... 更多字段
+};
+```
+
+#### skb 的生命周期
+
+**RX（接收）路径**：
+```
+1. 网卡 DMA       → 网卡驱动分配 skb，填充数据（skb->data 指向 DMA buffer）
+2. 协议栈处理     → skb 在 IP 层、TCP 层逐层解析（skb->data 指针逐层后移）
+3. socket buffer  → skb 挂到 socket 接收队列（sk->sk_receive_queue）
+4. read() 系统调用 → 数据从 skb 拷贝到用户态 buffer，skb 释放
+```
+
+**TX（发送）路径**：
+```
+1. write() 系统调用 → 数据从用户态拷贝到内核，分配 skb
+2. 协议栈封装      → skb 在 TCP 层、IP 层逐层添加头部（skb->data 指针前移）
+3. 网卡驱动        → skb 提交到网卡发送队列
+4. DMA 传输        → 网卡从 skb->data 读取数据，DMA 到物理内存，发送完成后释放 skb
+```
+
+#### skb 的关键操作
+
+| 操作 | 函数 | 说明 |
+|------|------|------|
+| **分配 skb** | `alloc_skb()` | 网卡驱动 RX 时分配，或 TCP 层发送时分配 |
+| **克隆 skb** | `skb_clone()` | 只复制 skb 结构体，共享底层数据（引用计数） |
+| **拷贝 skb** | `skb_copy()` | 深拷贝，包括结构体和数据区域 |
+| **调整 data 指针** | `skb_push()`/`skb_pull()` | 添加/移除协议头（不拷贝数据） |
+| **修改 metadata** | 直接修改 `skb->dev`/`skb->sk` | IPvlan 的 `dev_forward_skb()` 就是修改这些字段 |
+| **释放 skb** | `kfree_skb()` | 引用计数归零时真正释放内存 |
+
+#### 容器网络模式中的 skb 处理差异
+
+| 模式 | RX 路径中的 skb 处理 | 是否拷贝数据 |
+|------|---------------------|-------------|
+| **IPvlan** | 1. PF 驱动分配 skb<br>2. `rx_handler` 拦截，调用 `skb_clone()` 或修改 `skb->dev`<br>3. `dev_forward_skb()` 调整 skb metadata（指向 IPvlan 虚拟设备）<br>4. 进入容器 netns，继续 L3/L4 处理 | ✗ 不拷贝数据（只克隆结构体或调整 metadata） |
+| **Host Network** | 1. PF 驱动分配 skb<br>2. 直接在宿主机 netns 中完成 L2→L4 处理<br>3. 挂到 socket 接收队列 | ✗ 不拷贝数据 |
+| **VF 直通** | 1. VF 驱动分配 skb（DMA 通过 IOMMU）<br>2. 直接在容器 netns 中完成 L2→L4 处理<br>3. 挂到 socket 接收队列 | ✗ 不拷贝数据 |
+
+**关键结论**：
+- 三种模式在内核协议栈中都是**通过 skb 指针传递**，不拷贝数据区域
+- IPvlan 的 `dev_forward_skb()` 只修改 `skb->dev`、重置 MAC header 等 metadata，**不涉及 `skb->data` 指向的数据区域**
+- **唯一的数据拷贝**发生在用户态边界：`read()`（skb → 用户态 buffer）和 `write()`（用户态 buffer → skb）
+
+### 1.6 Redis 事件循环架构图
 
 <a id="图1"></a>
 
@@ -182,7 +260,7 @@ dev_forward_skb(ipvlan->dev, skb)
 │ 内核态 - 容器 netns                                           │
 └─────────────────────────────────────────────────────────────┘
 netif_rx() / netif_receive_skb()
-    ↓ 重新进入网络协议栈（第 2 次遍历）
+    ↓ 进入容器 netns 后继续完成 L3/L4 处理
 __netif_receive_skb_core()
     ↓ IP 层处理
 tcp_v4_rcv() / udp_rcv()
@@ -216,7 +294,7 @@ processCommandAndResetClient(c)
 | **netns 切换** | **CPU + 缓存失效** | **skb 的 metadata 调整（不涉及数据区域的拷贝）** |
 | 容器 L3→L4 处理 | CPU | 从 `netif_rx()` 重新进入协议栈，完成 TCP/UDP 处理 |
 | epoll_wait 唤醒 | 系统调用 | 进程调度 |
-| read() 系统调用 | 内存拷贝 | 内核 socket buffer → 用户态 buffer（**唯一的真正数据拷贝**） |
+| read() 系统调用 | 内存拷贝 | 内核 socket buffer → 用户态 buffer |
 
 **关键瓶颈**：
 - ✗ 数据包经过 rx_handler 拦截和 `dev_forward_skb()` netns 切换，比直通路径多一层软件转发
@@ -578,7 +656,8 @@ VF 硬件队列
 | VF 直通 | DMA(IOMMU)→内核 RX buffer → socket buffer → `read()` 拷贝到用户态 | 用户态 `write()` 拷贝到 socket buffer → `dev_queue_xmit()` → DMA(IOMMU) | 与 Host Network 相同的拷贝次数，VF 通过 IOMMU 实现地址隔离 |
 
 **关键澄清**：
-- `read()` 系统调用（内核 socket buffer → Redis 用户态 buffer）是三种模式都存在的**唯一的真正数据拷贝**
+- RX 路径：`read()` 系统调用（内核 socket buffer → Redis 用户态 buffer）是三种模式都存在的用户态数据拷贝
+- TX 路径：`write()`/`writev()` 系统调用（Redis 用户态 buffer → 内核 socket buffer）同样是三种模式都存在的用户态数据拷贝
 - IPvlan 的 `dev_forward_skb()` 和 `ipvlan_skb_crossing_ns()` 只修改 skb 的 metadata（`skb->dev` 指针、MAC header 重置等），**不拷贝数据区域**
 - `skb_clone()` 只复制 skb 结构体，共享底层数据（引用计数）
 
