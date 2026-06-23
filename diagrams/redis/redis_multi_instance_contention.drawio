@@ -166,7 +166,7 @@
         <mxCell id="sum1" value="✗ IPvlan: CPU 竞争和 netns 切换是主要瓶颈（红色区域最多）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="140" y="840" width="450" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="sum2" value="✗ Host Network: 共享路由表和 CPU 缓存污染导致竞争" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="sum2" value="✗ Host Network: 共享路由表竞争 + 多进程可能的缓存竞争（需实测）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="140" y="865" width="450" height="20" as="geometry" />
         </mxCell>
         <mxCell id="sum3" value="✓ VF 直通: 硬件隔离最好，仅 PCIe 带宽和 VF 数量有限制（绿色区域最多）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">

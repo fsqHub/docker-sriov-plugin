@@ -106,7 +106,7 @@
         <mxCell id="perf1" value="✗ 额外的 rx_handler 拦截 + &lt;b&gt;netns 切换&lt;/b&gt;开销" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="130" y="1025" width="250" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="perf2" value="✗ &lt;b&gt;netns 切换&lt;/b&gt;导致 CPU 缓存失效" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="perf2" value="✗ &lt;b&gt;netns 切换&lt;/b&gt;增加额外的函数调用和路由查找" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="130" y="1050" width="250" height="20" as="geometry" />
         </mxCell>
         <mxCell id="perf3" value="✗ 无硬件卸载支持（RSS、Checksum Offload）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">

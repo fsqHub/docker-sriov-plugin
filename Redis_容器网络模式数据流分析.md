@@ -291,14 +291,14 @@ processCommandAndResetClient(c)
 | 物理网卡 DMA | 硬件操作 | 数据传输到内核 RX buffer |
 | 宿主机 L2→L3 处理 | CPU | PF 驱动构建 skb，rx_handler 在 L3 层拦截（**不经过宿主机 TCP 层**） |
 | IPvlan rx_handler | CPU | IP 地址查找、哈希表查询、`dev_forward_skb()` 转发 |
-| **netns 切换** | **CPU + 缓存失效** | **skb 的 metadata 调整（不涉及数据区域的拷贝）** |
+| **netns 切换** | **CPU** | **skb 的 metadata 调整（不涉及数据区域的拷贝）** |
 | 容器 L3→L4 处理 | CPU | 从 `netif_rx()` 重新进入协议栈，完成 TCP/UDP 处理 |
 | epoll_wait 唤醒 | 系统调用 | 进程调度 |
 | read() 系统调用 | 内存拷贝 | 内核 socket buffer → 用户态 buffer |
 
 **关键瓶颈**：
 - ✗ 数据包经过 rx_handler 拦截和 `dev_forward_skb()` netns 切换，比直通路径多一层软件转发
-- ✗ netns 切换导致 **CPU 缓存失效**
+- ✗ 额外的函数调用和路由查找增加 CPU 周期
 - ✗ 无硬件卸载支持（RSS、Checksum Offload 对 IPvlan 虚拟设备不生效）
 - 注意：宿主机侧只处理到 L3（IP 头解析），**不会遍历宿主机的 TCP 层**
 
@@ -641,7 +641,7 @@ VF 硬件队列
 | Host Network | 完整 L2→L4 处理（直通） | 完整 L4→L2 处理（直通） | 最短路径 |
 | VF 直通 | 容器 netns 中完整 L2→L4 处理 | 容器 netns 中完整 L4→L2 处理 | 与 Host Network 相当，不经过宿主机 netns |
 
-**结论**：IPvlan 的额外开销来自 rx_handler 的软件转发层和 netns 切换，不是「两次完整的 TCP/IP 栈遍历」。Host Network 和 VF 直通的协议栈处理路径长度相当。
+**结论**：IPvlan 的额外开销来自 rx_handler 的软件转发层和 netns 切换，不是「两次完整的 TCP/IP 栈遍历」。**当相关配置（如队列数，中断等）相同时**，Host Network 和 VF 直通的协议栈处理路径长度相当。
 
 ---
 
@@ -659,35 +659,7 @@ VF 硬件队列
 - RX 路径：`read()` 系统调用（内核 socket buffer → Redis 用户态 buffer）是三种模式都存在的用户态数据拷贝
 - TX 路径：`write()`/`writev()` 系统调用（Redis 用户态 buffer → 内核 socket buffer）同样是三种模式都存在的用户态数据拷贝
 - IPvlan 的 `dev_forward_skb()` 和 `ipvlan_skb_crossing_ns()` 只修改 skb 的 metadata（`skb->dev` 指针、MAC header 重置等），**不拷贝数据区域**
-- `skb_clone()` 只复制 skb 结构体，共享底层数据（引用计数）
-
-### 4.4 性能理论估算（示例假设值）
-
-以下数据为基于架构分析的**理论推测值**，不是实测数据。实际性能取决于硬件配置（CPU、NIC、IRQ 亲和性）、Redis 配置（pipeline、数据大小）、网络负载等多种因素。
-
-基于 redis-benchmark 典型场景的性能估算（单实例，-c 50 -n 100000 -d 256）：
-
-| 指标 | IPvlan | Host Network | VF 直通 | 说明 |
-|------|--------|--------------|---------|------|
-| **QPS（GET 操作）** | 60,000 | 100,000 (基准) | 95,000 | 小数据包场景 |
-| **QPS（SET 操作）** | 55,000 | 95,000 (基准) | 90,000 | 写入场景 |
-| **平均延迟（GET）** | 1.8 ms | 1.0 ms | 1.05 ms | P50 延迟 |
-| **P99 延迟** | 5.2 ms | 2.8 ms | 3.0 ms | 尾延迟 |
-| **CPU 用户态占比** | 35% | 40% | 38% | Redis 进程 CPU |
-| **CPU 内核态占比** | 45% | 30% | 33% | 系统调用 + 协议栈 |
-| **CPU 软中断占比** | 20% | 15% | 16% | 网络中断处理 |
-
-**关键观察**：
-1. **IPvlan CPU 内核态占比最高（45%）**：额外的 rx_handler 拦截 + netns 切换开销
-2. **Host Network 性能最优**：零虚拟化开销
-3. **VF 直通接近 Host Network**：可能存在 IOMMU/IOTLB 开销（依赖硬件配置）
-4. **延迟差异**：IPvlan 比 Host Network 高 **80%**
-
-<a id="图6"></a>
-
-![Redis 性能指标对比](diagrams/redis/redis_performance_comparison.png)
-
-*图 6：Redis 性能指标对比 - QPS、延迟、CPU 使用率的量化对比*
+- `skb_clone()` **只复制 skb 结构体，共享底层数据**（引用计数）
 
 ---
 
@@ -774,7 +746,7 @@ docker run --rm --net=sriov_net redis:latest \
 **测试拓扑**：
 - **服务端**：1 台物理机运行 40 个 Redis 容器（redis-server，默认配置）
 - **客户端**：1 台物理机运行 40 个 redis-benchmark，每个对应一个 Redis 实例
-- **网络**：Intel 82599 10GbE 网卡，支持 64 个 VF
+- **网络**：CX5 25GbE 网卡，支持 64 个 VF
 
 **测试目标**：
 - 分析资源竞争点
@@ -797,13 +769,8 @@ docker run --rm --net=sriov_net redis:latest \
 
 **netns 切换累加**：
 - 每个数据包都需要 netns 切换（40 倍累加）
-- CPU 缓存失效率可能上升
+- 额外的函数调用和路由查找增加 CPU 周期
 - TLB 刷新可能更频繁（需通过 `perf stat -e dTLB-load-misses` 确认）
-
-**性能表现**：
-- 1 实例：60K QPS
-- 10 实例：45K QPS/实例（总 450K QPS）
-- 40 实例：30K QPS/实例（总 1.2M QPS）— **性能下降 50%**
 
 ---
 
@@ -818,15 +785,10 @@ docker run --rm --net=sriov_net redis:latest \
 - 共享 conntrack 表（高并发短连接场景下可能成为瓶颈）
 - TCP time-wait 状态占用（短连接场景）
 
-**CPU 缓存污染**：
-- 40 个进程无 netns 隔离
-- L2/L3 缓存频繁失效
-- 上下文切换开销增加
-
-**性能表现**：
-- 1 实例：100K QPS
-- 10 实例：90K QPS/实例（总 900K QPS）
-- 40 实例：70K QPS/实例（总 2.8M QPS）— **性能下降 30%**
+**多进程竞争（可能观察项）**：
+- 40 个进程在同一 netns 中运行
+- 可能存在 L2/L3 缓存竞争（需通过 `perf stat -e cache-misses` 确认）
+- 上下文切换开销（可通过 `pidstat -w` 监控）
 
 ---
 
@@ -850,19 +812,6 @@ docker run --rm --net=sriov_net redis:latest \
 - VF 通过 mailbox 与 PF 通信（配置更新）
 - 40 个 VF 的 mailbox 中断累加
 - PF 驱动的轮询开销
-
-**性能表现**：
-- 1 实例：95K QPS
-- 10 实例：90K QPS/实例（总 900K QPS）
-- 40 实例：75K QPS/实例（总 3.0M QPS）— **性能下降 20%**
-
-<a id="图9"></a>
-
-![多实例性能扩展性曲线](diagrams/redis/redis_multi_instance_scalability.png)
-
-*图 9：多实例性能扩展性曲线 - 展示 1/5/10/20/40 实例下三种模式的性能变化趋势*
-
-**图示位置**：参见 [图 8：多实例资源竞争热力图](#图8) 和 [图 9：多实例性能扩展性曲线](#图9)
 
 ---
 
@@ -893,7 +842,7 @@ watch -n 1 'cat /proc/softirqs | grep NET'
 - Redis SET 请求：~300 字节/请求
 - 40 实例 × 50K QPS × 300B = **600MB/s ≈ 4.8Gbps**
 
-**结论**：10Gbps 网卡足够，带宽不是瓶颈。
+**作用**：确认网卡带宽是否为瓶颈
 
 ---
 
@@ -901,8 +850,8 @@ watch -n 1 'cat /proc/softirqs | grep NET'
 
 **DMA + 内存拷贝总和**：
 - 40 实例 × 50K QPS × 300B × 2（RX+TX）= **1.2GB/s**
-- 现代服务器内存带宽：~50GB/s（DDR4-2666）
-- **结论**：内存带宽充足
+
+**作用**：确认内存带宽是否为瓶颈
 
 ---
 
