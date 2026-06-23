@@ -22,7 +22,7 @@
         <mxCell id="ipv_nscross" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" value="netns 切换&#xa;ipvlan_skb_crossing_ns()" vertex="1">
           <mxGeometry height="70" width="170" x="215" y="430" as="geometry" />
         </mxCell>
-        <mxCell id="ipv_hstack" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="宿主机 TCP/IP 协议栈&#xa;(第 2 次遍历)&#xa;ip_route_output_flow()&#xa;ip_local_out()" vertex="1">
+        <mxCell id="ipv_hstack" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="宿主机 netns 侧路由处理&#xa;ip_route_output_flow()&#xa;ip_local_out()" vertex="1">
           <mxGeometry height="70" width="200" x="200" y="540" as="geometry" />
         </mxCell>
         <mxCell id="ipv_pfdrv" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" value="PF 网卡驱动&#xa;ixgbe_xmit_frame()&#xa;dev_queue_xmit()" vertex="1">
@@ -73,7 +73,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="ipv_note1" parent="1" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" value="&lt;font color=&quot;#b85450&quot;&gt;协议栈遍历 2 次&lt;br&gt;无硬件卸载&lt;br&gt;CPU 开销大&lt;/font&gt;" vertex="1">
+        <mxCell id="ipv_note1" parent="1" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" value="&lt;font color=&quot;#b85450&quot;&gt;额外 rx_handler 拦截&lt;br&gt;+ netns 切换&lt;br&gt;无硬件卸载&lt;/font&gt;" vertex="1">
           <mxGeometry height="60" width="120" x="480" y="400" as="geometry" />
         </mxCell>
         <mxCell id="ipv_boundary" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;strokeWidth=2;dashed=1;" value="" vertex="1">

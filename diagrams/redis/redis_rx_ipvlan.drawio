@@ -61,7 +61,7 @@
         <mxCell id="cont1" value="netif_rx()&#xa;重新进入协议栈" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="130" y="590" width="180" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="cont2" value="TCP/IP 协议栈处理&#xa;（第 2 次遍历）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="cont2" value="TCP/IP 协议栈处理&#xa;（容器 netns 中 L3→L4）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="330" y="590" width="220" height="40" as="geometry" />
         </mxCell>
         <mxCell id="cont3" value="加入 socket 接收队列&#xa;唤醒 Redis 进程" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;fontSize=11;" vertex="1" parent="1">
@@ -103,7 +103,7 @@
         <mxCell id="perf_title" value="&lt;b&gt;性能开销&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;fontColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="120" y="990" width="100" height="25" as="geometry" />
         </mxCell>
-        <mxCell id="perf1" value="✗ 协议栈遍历 &lt;b&gt;2 次&lt;/b&gt;（宿主机 + 容器）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="perf1" value="✗ 额外的 rx_handler 拦截 + &lt;b&gt;netns 切换&lt;/b&gt;开销" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="130" y="1025" width="250" height="20" as="geometry" />
         </mxCell>
         <mxCell id="perf2" value="✗ &lt;b&gt;netns 切换&lt;/b&gt;导致 CPU 缓存失效" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">

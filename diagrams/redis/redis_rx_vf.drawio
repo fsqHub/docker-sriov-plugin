@@ -98,7 +98,7 @@
         <mxCell id="perf4" value="✓ 完整的硬件卸载支持（RSS、Checksum Offload、VLAN 过滤）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="130" y="880" width="440" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="perf5" value="✗ IOMMU 地址转换开销（1-3%）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#666;" vertex="1" parent="1">
+        <mxCell id="perf5" value="✗ 可能存在 IOMMU/IOTLB 开销（依赖硬件配置）" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#666;" vertex="1" parent="1">
           <mxGeometry x="130" y="905" width="300" height="20" as="geometry" />
         </mxCell>
 

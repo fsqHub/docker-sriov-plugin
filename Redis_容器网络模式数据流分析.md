@@ -228,7 +228,7 @@ processCommandAndResetClient(c)
 
 ![IPvlan 模式数据接收路径](diagrams/redis/redis_rx_ipvlan.png)
 
-*图 2：IPvlan 模式 - Redis 数据接收完整路径，展示双重协议栈遍历和 netns 切换开销*
+*图 2：IPvlan 模式 - Redis 数据接收完整路径，展示 rx_handler 拦截、dev_forward_skb() netns 切换等额外开销*
 
 ---
 
@@ -289,7 +289,7 @@ processInputBuffer(c)
 - ✓ 协议栈遍历 **1 次**（最短路径）
 - ✓ 无 netns 切换开销
 - ✓ 完整的硬件卸载支持（RSS、TSO、GSO、Checksum Offload）
-- ✓ 与物理机性能完全一致
+- ✓ 网络栈路径基本等同于主机普通进程（仍可能受 cgroup、调度、seccomp 等容器隔离配置影响）
 
 **代价**：
 - ✗ 无网络隔离（与宿主机共享网络栈）
@@ -341,7 +341,7 @@ epoll_wait() 返回
 readQueryFromClient()
     ↓ connRead(c->conn, ...)
     ↓ read(fd, buf, len)
-    ↓ 从容器内核复制到用户态
+    ↓ 从内核 socket buffer 复制到 Redis 用户态 buffer
 processInputBuffer(c)
     ↓ RESP 协议解析
     ↓ 命令执行
@@ -353,7 +353,7 @@ processInputBuffer(c)
 |------|----------|------|
 | VF 硬件 DMA | 硬件操作 | DMA 到 VF 驱动的内核 RX buffer（IOMMU 地址隔离） |
 | VF 中断 | 硬件隔离 | 独立的 MSI-X 中断向量 |
-| IOMMU 地址转换 | 轻微开销 | 1-3% 性能损失（现代硬件已优化） |
+| IOMMU 地址转换 | 轻微开销 | 可能存在 IOMMU/IOTLB 开销，依赖硬件和配置 |
 | 容器协议栈 | CPU | 在容器 netns 中完成完整的 L2→L4 处理 |
 | epoll_wait 唤醒 | 系统调用 | 进程调度 |
 | read() 系统调用 | 内存拷贝 | 内核 socket buffer → 用户态 buffer |
@@ -366,7 +366,7 @@ processInputBuffer(c)
 - ✓ 网络隔离性强（独立 netns + 硬件隔离）
 
 **代价**：
-- ✗ IOMMU 地址转换开销（1-3%）
+- ✗ 可能存在 IOMMU/IOTLB 地址转换开销（依赖硬件和配置）
 - ✗ VF 数量限制（Intel 82599 最多 64 个）
 - ✗ 需要硬件 SR-IOV 支持
 
@@ -418,15 +418,18 @@ void _addReplyToBufferOrList(client *c, const char *s, size_t len) {
 }
 ```
 
-**写入操作**（`networking.c:1900-1947` - `_writeToClient()`）：
+**写入操作**（`networking.c:1896-1934` - `_writeToClient()`）：
 
 ```c
-ssize_t _writeToClient(client *c, ssize_t *nwritten) {
-    // 使用 writev() 批量写入
-    if (c->bufpos > 0) {
-        struct iovec iov[3];
-        // 填充 iovec 数组...
-        nwritten = writev(fd, iov, iovcnt);  // 系统调用
+int _writeToClient(client *c, ssize_t *nwritten) {
+    // reply 链表非空时，用 writev 批量发送（buf + reply 块合并到 iov 数组）
+    if (listLength(c->reply) > 0) {
+        int ret = _writevToClient(c, nwritten);  // → connWritev() → writev()
+        if (ret != C_OK) return ret;
+    // reply 链表为空、buf 有数据时，直接 write
+    } else if (c->bufpos > 0) {
+        *nwritten = connWrite(c->conn, c->buf + c->sentlen,
+                              c->bufpos - c->sentlen);  // → write()
     }
 }
 ```
@@ -473,7 +476,7 @@ ixgbe_xmit_frame()                 ← PF 驱动
 物理网卡硬件发送
 ```
 
-**开销**：双重协议栈遍历 + netns 切换 + 路由查找 2 次
+**开销**：额外的 rx_handler/dev_forward_skb() 拦截 + netns 切换 + 宿主机侧路由查找
 
 ---
 
@@ -596,9 +599,9 @@ VF 硬件队列
 | **CPU 软中断占比** | 20% | 15% | 16% | 网络中断处理 |
 
 **关键观察**：
-1. **IPvlan CPU 内核态占比最高（45%）**：双重协议栈 + netns 切换
+1. **IPvlan CPU 内核态占比最高（45%）**：额外的 rx_handler 拦截 + netns 切换开销
 2. **Host Network 性能最优**：零虚拟化开销
-3. **VF 直通接近 Host Network（95%）**：IOMMU 开销约 5%
+3. **VF 直通接近 Host Network**：可能存在 IOMMU/IOTLB 开销（依赖硬件配置）
 4. **延迟差异**：IPvlan 比 Host Network 高 **80%**
 
 <a id="图6"></a>
@@ -715,8 +718,8 @@ docker run --rm --net=sriov_net redis:latest \
 
 **netns 切换累加**：
 - 每个数据包都需要 netns 切换（40 倍累加）
-- CPU 缓存失效率上升
-- TLB (Translation Lookaside Buffer) 刷新频繁
+- CPU 缓存失效率可能上升
+- TLB 刷新可能更频繁（需通过 `perf stat -e dTLB-load-misses` 确认）
 
 **性能表现**：
 - 1 实例：60K QPS
@@ -731,9 +734,9 @@ docker run --rm --net=sriov_net redis:latest \
 - 40 个实例需要 40 个不同端口（6379, 6380, ..., 6418）
 - 端口配置复杂度线性增长
 
-**宿主机网络栈竞争**：
-- 共享路由表（读写锁竞争）
-- 共享 conntrack 表（连接跟踪竞争）
+**宿主机网络栈竞争（可能观察项）**：
+- 共享路由表（可能存在读写锁竞争，需 `perf lock` 确认）
+- 共享 conntrack 表（高并发短连接场景下可能成为瓶颈）
 - TCP time-wait 状态占用（短连接场景）
 
 **CPU 缓存污染**：
@@ -759,10 +762,10 @@ docker run --rm --net=sriov_net redis:latest \
 - 单实例平均带宽：10Gbps / 40 = 250Mbps
 - 小包场景（Redis）不易达到带宽瓶颈
 
-**IOMMU 页表竞争**：
+**IOMMU 页表竞争（可能观察项）**：
 - 多个 VF 同时进行 DMA 地址转换
 - IOTLB 缓存命中率下降
-- 转换延迟增加（1-3% → 3-5%）
+- 转换延迟可能增加（需使用 perf 或 Intel VTune 确认）
 
 **PF 管理开销**：
 - VF 通过 mailbox 与 PF 通信（配置更新）
@@ -824,18 +827,26 @@ watch -n 1 'cat /proc/softirqs | grep NET'
 
 ---
 
-#### 锁竞争分析
+#### 锁竞争分析（可能观察项）
 
-**关键锁**：
-- netns 路由表锁（IPvlan 模式）
-- conntrack 表锁（Host Network 模式）
-- IOMMU 页表锁（VF 直通模式）
+以下为多实例场景下**可能**出现的锁竞争点，需要通过实际工具确认是否构成瓶颈：
 
-**分析工具**：
+**排查方向**：
+- netns 路由表读写锁（IPvlan 模式 — 多容器共享宿主机侧路由处理）
+- conntrack 表锁（Host Network 模式 — 40 进程共享连接跟踪表）
+- IOMMU 页表锁（VF 直通模式 — 多 VF 的 DMA 映射操作）
+
+**确认工具**：
 ```bash
-# 使用 perf 分析锁竞争
+# 使用 perf 确认锁竞争是否真实存在
 perf record -e lock:contention_begin -ag -- sleep 10
 perf report
+
+# 查看软中断分布
+watch -n 1 'cat /proc/softirqs | grep NET'
+
+# 查看网卡统计
+ethtool -S <dev> | grep -E "rx_|tx_|err"
 ```
 
 ---

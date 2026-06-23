@@ -137,7 +137,7 @@
         </mxCell>
 
         <!-- Summary -->
-        <mxCell id="ipv_summary" value="✗ 协议栈 2 次&#xa;✗ netns 切换&#xa;✗ 路由查找 2 次" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e6;strokeColor=#d6b656;fontSize=10;align=left;" vertex="1" parent="1">
+        <mxCell id="ipv_summary" value="✗ 额外 rx_handler 拦截&#xa;✗ netns 切换&#xa;✗ 宿主机侧路由处理" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e6;strokeColor=#d6b656;fontSize=10;align=left;" vertex="1" parent="1">
           <mxGeometry x="120" y="640" width="310" height="60" as="geometry" />
         </mxCell>
         <mxCell id="host_summary" value="✓ 协议栈 1 次&#xa;✓ 无 netns 切换&#xa;✓ 完整硬件卸载" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#4caf50;fontSize=10;align=left;" vertex="1" parent="1">
