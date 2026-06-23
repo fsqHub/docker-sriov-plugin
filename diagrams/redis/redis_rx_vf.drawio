@@ -72,7 +72,7 @@
         <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#82b366;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="hw_box" target="cont_box">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="arrow1_label" value="DMA 直通" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#2e7d32;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="arrow1_label" value="IOMMU DMA" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#2e7d32;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="360" y="225" width="80" height="25" as="geometry" />
         </mxCell>
         <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#6c8ebf;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="cont_box" target="user_box">

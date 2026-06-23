@@ -117,7 +117,7 @@ struct client {
     int qb_pos;                   // 协议解析位置
     list *reply;                  // 输出缓冲区链表
     size_t buf_usable_size;       // 输出缓冲区可用大小
-    char *buf;                    // 输出缓冲区（动态分配，初始 PROTO_REPLY_CHUNK_BYTES = 16KB）
+    char *buf;                    // 输出缓冲区（在 createClient() 中一次性分配，初始 16KB）
     // ... 更多字段
 };
 ```
@@ -125,7 +125,7 @@ struct client {
 **缓冲策略**：
 - **输入**：使用 SDS (Simple Dynamic String) 动态扩展
 - **输出**：
-  - 优先使用动态分配的快速缓冲区（`buf`，初始 16KB，可按需增长）
+  - 优先使用固定大小的快速缓冲区（`buf`，16KB，在 `createClient()` 中一次性分配）
   - 溢出时使用链表（`reply`）存储大响应
 
 ### 1.5 Redis 事件循环架构图
@@ -280,7 +280,7 @@ processInputBuffer(c)
 | 阶段 | 开销类型 | 说明 |
 |------|----------|------|
 | 物理网卡 DMA | 硬件操作 | 数据传输到宿主机内存 |
-| 协议栈处理 | CPU + 内存拷贝 | **仅 1 次遍历**（vs IPvlan 2 次） |
+| 协议栈处理 | CPU | 完整处理（相比 IPvlan 少了 rx_handler/netns 切换等软件转发层） |
 | GRO 聚合 | CPU 优化 | 减少协议栈处理次数 |
 | epoll_wait 唤醒 | 系统调用 | 进程调度 |
 | read() 系统调用 | 内存拷贝 | 内核 → 用户态 |
@@ -535,7 +535,7 @@ VF 硬件队列
     ↓ 端口发送
 ```
 
-**优势**：单次协议栈遍历 + DMA 直通 + 硬件 QoS + 不经过宿主机 netns
+**优势**：VF 独立队列 + IOMMU 地址隔离 + 硬件 QoS + 不经过宿主机 netns
 
 **图示位置**：参见 [图 5：Redis 数据发送路径对比](#图5)
 

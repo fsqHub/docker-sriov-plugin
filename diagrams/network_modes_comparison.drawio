@@ -175,7 +175,7 @@
         <mxCell id="vf_e2" edge="1" parent="1" source="vf_cstack" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#d79b00;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="vf_drv" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="vf_e3" edge="1" parent="1" source="vf_drv" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#d79b00;fontSize=10;fontColor=#d79b00;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="vf_iommu" value="DMA 直通">
+        <mxCell id="vf_e3" edge="1" parent="1" source="vf_drv" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#d79b00;fontSize=10;fontColor=#d79b00;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="vf_iommu" value="IOMMU DMA">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="vf_e4" edge="1" parent="1" source="vf_iommu" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#d79b00;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="vf_hw" value="">
@@ -292,7 +292,7 @@
         <mxCell id="leg_red_l" parent="1" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;" value="开销节点" vertex="1">
           <mxGeometry height="25" width="70" x="1490" y="882" as="geometry" />
         </mxCell>
-        <mxCell id="leg_steps" parent="1" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;" value="&lt;b&gt;路径深度:&lt;/b&gt;  IPvlan = 6 步 (含 2 次协议栈)  |  Host Network = 3 步  |  VF 直通 = 5 步 (DMA 直通, 不经过宿主机 netns)" vertex="1">
+        <mxCell id="leg_steps" parent="1" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=10;" value="&lt;b&gt;路径深度:&lt;/b&gt;  IPvlan = 6 步 (含 rx_handler + netns 切换)  |  Host Network = 3 步  |  VF 直通 = 5 步 (VF 独立队列, 不经过宿主机 netns)" vertex="1">
           <mxGeometry height="25" width="800" x="120" y="915" as="geometry" />
         </mxCell>
       </root>
