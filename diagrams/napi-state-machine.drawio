@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="NAPI State Machine">
+    <mxGraphModel>
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="NAPI 状态机" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=20;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="20" width="200" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- IDLE State -->
+        <mxCell id="idle_state" value="IDLE 状态&#xa;&#xa;等待硬件中断" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="320" y="100" width="160" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Hardware Interrupt -->
+        <mxCell id="hw_interrupt" value="硬件中断到达&#xa;(网卡收到数据包)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="250" width="200" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_idle_int" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="idle_state" target="hw_interrupt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- napi_schedule() -->
+        <mxCell id="napi_schedule" value="napi_schedule()&#xa;关闭网卡中断&#xa;调度到 poll_list" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="285" y="350" width="230" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_int_schedule" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="hw_interrupt" target="napi_schedule">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- SCHED State -->
+        <mxCell id="sched_state" value="NAPI_STATE_SCHED&#xa;&#xa;已调度，等待软中断处理" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="300" y="460" width="200" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_schedule_sched" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="napi_schedule" target="sched_state">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- net_rx_action() -->
+        <mxCell id="net_rx_action" value="软中断上下文：net_rx_action()&#xa;遍历 poll_list" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="270" y="610" width="260" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_sched_action" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="sched_state" target="net_rx_action">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Poll -->
+        <mxCell id="poll_box" value="napi-&gt;poll(napi, budget)&#xa;&#xa;处理数据包&#xa;(最多 weight 个，默认 64)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="270" y="710" width="260" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_action_poll" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="net_rx_action" target="poll_box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Decision: work_done < budget? -->
+        <mxCell id="decision" value="work_done &lt; budget?&#xa;(队列空了吗？)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="280" y="840" width="240" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_poll_decision" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="poll_box" target="decision">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- No path: keep polling -->
+        <mxCell id="keep_sched" value="返回 budget&#xa;保持 SCHED 状态&#xa;继续 poll" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="850" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_no" value="否 (还有数据)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontStyle=1;fontSize=12;" edge="1" parent="1" source="decision" target="keep_sched">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Loop back -->
+        <mxCell id="edge_loop" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;dashed=1;" edge="1" parent="1" source="keep_sched" target="poll_box">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="700" y="750" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Yes path: complete -->
+        <mxCell id="napi_complete" value="napi_complete_done()&#xa;清除 SCHED 状态&#xa;重新开启网卡中断" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="850" width="180" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="edge_yes" value="是 (队列空)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;fontStyle=1;fontSize=12;" edge="1" parent="1" source="decision" target="napi_complete">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Back to IDLE -->
+        <mxCell id="edge_complete_idle" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;dashed=1;" edge="1" parent="1" source="napi_complete" target="idle_state">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="130" y="150" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="idle_label" value="回到 IDLE&#xa;等待下一次中断" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="50" y="400" width="120" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend_box" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="990" width="740" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="legend_title" value="关键概念" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1000" width="100" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend1" value="• budget：单次 poll 最多处理的数据包数 (默认 napi-&gt;weight = 64)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1025" width="400" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend2" value="• work_done：本次 poll 实际处理的数据包数" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1045" width="350" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend3" value="• 如果 work_done = budget，说明队列可能还有数据，继续 poll" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="450" y="1025" width="320" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend4" value="• 如果 work_done &lt; budget，说明队列空了，退出 poll，重开中断" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="450" y="1045" width="320" height="20" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

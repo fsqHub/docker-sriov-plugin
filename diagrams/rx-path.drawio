@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="RX Path">
+    <mxGraphModel>
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="网络协议栈 RX 路径（接收数据包）" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="20" width="400" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Hardware Layer -->
+        <mxCell id="hw_layer" value="硬件层" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="80" width="640" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="hw_dma" value="网卡 DMA 到内存" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="hw_layer">
+          <mxGeometry x="40" y="40" width="160" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="hw_interrupt" value="产生硬件中断" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="hw_layer">
+          <mxGeometry x="240" y="40" width="160" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="hw_edge" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="hw_layer" source="hw_dma" target="hw_interrupt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Interrupt Handler -->
+        <mxCell id="int_layer" value="中断处理（硬中断上下文）" style="swimlane;startSize=30;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="200" width="640" height="120" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="int_handler" value="ixgbe_msix_clean_rings()&#xa;(驱动中断处理函数)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="int_layer">
+          <mxGeometry x="40" y="40" width="180" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="int_schedule" value="napi_schedule()&#xa;调度 NAPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="int_layer">
+          <mxGeometry x="260" y="40" width="140" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="int_mask" value="关闭硬件中断" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="int_layer">
+          <mxGeometry x="440" y="40" width="140" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="int_edge1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="int_layer" source="int_handler" target="int_schedule">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="int_edge2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="int_layer" source="int_schedule" target="int_mask">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Softirq Layer -->
+        <mxCell id="soft_layer" value="软中断处理（NET_RX_SOFTIRQ）" style="swimlane;startSize=30;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="340" width="640" height="200" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="soft_action" value="net_rx_action()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="soft_layer">
+          <mxGeometry x="40" y="40" width="140" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="soft_poll" value="napi-&gt;poll()&#xa;(驱动 poll 函数)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="soft_layer">
+          <mxGeometry x="220" y="40" width="140" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="soft_clean" value="ixgbe_clean_rx_irq()&#xa;从 RX 环读取描述符" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="soft_layer">
+          <mxGeometry x="400" y="40" width="180" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="soft_alloc" value="alloc_skb()&#xa;分配 skb" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="soft_layer">
+          <mxGeometry x="40" y="110" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="soft_data" value="skb-&gt;data 指向&#xa;DMA buffer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="soft_layer">
+          <mxGeometry x="200" y="110" width="140" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="soft_gro" value="napi_gro_receive(skb)&#xa;提交到协议栈" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="soft_layer">
+          <mxGeometry x="380" y="110" width="180" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="soft_edge1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="soft_layer" source="soft_action" target="soft_poll">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="soft_edge2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="soft_layer" source="soft_poll" target="soft_clean">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="soft_edge3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="soft_layer" source="soft_clean" target="soft_alloc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="490" y="90" />
+              <mxPoint x="100" y="90" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="soft_edge4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="soft_layer" source="soft_alloc" target="soft_data">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="soft_edge5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="soft_layer" source="soft_data" target="soft_gro">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Protocol Stack -->
+        <mxCell id="proto_layer" value="协议栈处理（软中断上下文）" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="560" width="640" height="240" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="proto_receive" value="netif_receive_skb()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="proto_layer">
+          <mxGeometry x="40" y="40" width="160" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="proto_core" value="__netif_receive_skb_core()&#xa;遍历 rx_handler 链" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="proto_layer">
+          <mxGeometry x="240" y="40" width="200" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="proto_ipvlan" value="IPvlan 的 rx_handler&#xa;在此拦截" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontStyle=2;" vertex="1" parent="proto_layer">
+          <mxGeometry x="480" y="40" width="140" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="proto_ip" value="ip_rcv()&#xa;IP 层处理" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="proto_layer">
+          <mxGeometry x="40" y="110" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="proto_tcp" value="tcp_v4_rcv()&#xa;TCP 层处理" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="proto_layer">
+          <mxGeometry x="200" y="110" width="140" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="proto_rcv" value="tcp_rcv_established()&#xa;数据接收" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="proto_layer">
+          <mxGeometry x="380" y="110" width="180" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="proto_queue" value="__skb_queue_tail()&#xa;挂到 socket 接收队列" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="proto_layer">
+          <mxGeometry x="40" y="180" width="200" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="proto_wake" value="sk-&gt;sk_data_ready()&#xa;唤醒 epoll" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="proto_layer">
+          <mxGeometry x="280" y="180" width="180" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="proto_edge1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="proto_layer" source="proto_receive" target="proto_core">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="proto_edge2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="proto_layer" source="proto_core" target="proto_ip">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="340" y="90" />
+              <mxPoint x="100" y="90" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="proto_edge3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="proto_layer" source="proto_ip" target="proto_tcp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="proto_edge4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="proto_layer" source="proto_tcp" target="proto_rcv">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="proto_edge5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="proto_layer" source="proto_rcv" target="proto_queue">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="470" y="160" />
+              <mxPoint x="140" y="160" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="proto_edge6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="proto_layer" source="proto_queue" target="proto_wake">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Application Layer -->
+        <mxCell id="app_layer" value="应用层" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="820" width="640" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="app_epoll" value="epoll_wait() 返回" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="app_layer">
+          <mxGeometry x="40" y="40" width="160" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="app_read" value="read(fd, buf, len)&#xa;tcp_recvmsg()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="app_layer">
+          <mxGeometry x="240" y="40" width="160" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="app_copy" value="skb_copy_datagram_iter()&#xa;拷贝到用户态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="app_layer">
+          <mxGeometry x="440" y="40" width="180" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="app_edge1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="app_layer" source="app_epoll" target="app_read">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="app_edge2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="app_layer" source="app_read" target="app_copy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Cross-layer edges -->
+        <mxCell id="cross_edge1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="1" source="hw_interrupt" target="int_handler">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cross_edge2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="1" source="int_mask" target="soft_action">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cross_edge3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="1" source="soft_gro" target="proto_receive">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cross_edge4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="1" source="proto_wake" target="app_epoll">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Note -->
+        <mxCell id="note" value="注：带动画箭头的连接表示数据包流动路径" style="text;html=1;strokeColor=#d6b656;fillColor=#fff2cc;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="240" y="940" width="320" height="30" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,132 +1,108 @@
-# 容器网络模式对比分析 - 图示索引
+# 图示索引
 
-本文档配套图示说明。
+本目录包含了《Linux 内核网络知识汇编》文档的配套图示。所有图示均使用 draw.io 创建，包含可编辑的 `.drawio` 源文件和 PNG 导出文件。
 
 ## 图示列表
 
-### 图 1：三种网络模式处理路径对比
-**文件**: `network_modes_comparison.drawio.png` / `.svg`
+### 1. NAPI 机制相关
 
-**内容**: 并排对比 IPvlan、Host Network、VF 直通三种模式的完整数据包处理路径
+#### 1.1 NAPI 三种模式对比
+- **文件**: `napi-three-modes.drawio.png`
+- **源文件**: `napi-three-modes.drawio`
+- **说明**: 对比 Docker IPvlan、Host Network、VF 直通三种模式下的 NAPI 架构，展示 NAPI 实例归属、Budget 配置和隔离机制
+- **文档引用**: 内核网络知识.md § 1.6
 
-**关键要点**:
-- IPvlan：双重协议栈遍历（宿主机 + 容器）、netns 切换开销
-- Host Network：零虚拟化开销、最短路径、完整硬件卸载
-- VF 直通：硬件级隔离、DMA 直通、不经过宿主机 netns
+#### 1.2 NAPI 状态机
+- **文件**: `napi-state-machine.drawio.png`
+- **源文件**: `napi-state-machine.drawio`
+- **说明**: 展示 NAPI 从 IDLE → SCHED → POLL → COMPLETE 的完整状态转换流程，包括中断处理、软中断调度和 budget 判断逻辑
+- **文档引用**: 内核网络知识.md § 1.4
 
-**引用位置**: 主文档第二章开头
+### 2. 网络协议栈
 
----
+#### 2.1 RX 路径（接收数据包）
+- **文件**: `rx-path.drawio.png`
+- **源文件**: `rx-path.drawio`
+- **说明**: 完整的数据包接收路径，从硬件 DMA、硬中断处理、NAPI poll、协议栈处理到应用层读取，展示各层次的关键函数调用
+- **文档引用**: 内核网络知识.md § 3.1
 
-### 图 2：SR-IOV 硬件架构详解
-**文件**: `sriov_hardware_architecture.drawio.png` / `.svg`
+### 3. skb 数据结构
 
-**内容**: 展示物理网卡中 PF 与多个 VF 的硬件关系
+#### 3.1 skb 结构与内存布局
+- **文件**: `skb-structure.drawio.png`
+- **源文件**: `skb-structure.drawio`
+- **说明**: 展示 `struct sk_buff` 的关键字段（指针、元数据）和内存布局（headroom、data、tailroom），以及 IPvlan 如何通过修改 metadata 实现零拷贝转发
+- **文档引用**: 内核网络知识.md § 2.3
 
-**关键要点**:
-- 每个 VF 有独立的 BDF (Bus/Device/Function)
-- 独立的硬件队列（TX/RX 描述符环）
-- 独立的 MSI-X 中断向量
-- 独立的 MAC 地址和 VLAN 过滤
-- PF 通过硬件寄存器管理 VF 资源
-- 所有 VF 和 PF 共享物理端口，通过硬件调度器公平分配 PCIe 带宽
+### 4. IPvlan 机制
 
-**引用位置**: 主文档第四章 4.2 节
+#### 4.1 IPvlan rx_handler 数据包分发流程
+- **文件**: `ipvlan-rx-handler.drawio.png`
+- **源文件**: `ipvlan-rx-handler.drawio`
+- **说明**: 详细展示 IPvlan 的 rx_handler 如何在协议栈入口拦截数据包、根据模式（L2/L3/L3S）查找目标设备、修改 skb 元数据并切换 netns
+- **文档引用**: 内核网络知识.md § 4.1
 
----
+### 5. SR-IOV 硬件架构（已存在）
 
-### 图 3：VF vs PF 性能对比
-**文件**: `vf_performance_comparison.drawio.png` / `.svg`
+#### 5.1 SR-IOV 硬件架构
+- **文件**: `sriov_hardware_architecture.drawio.png`
+- **说明**: SR-IOV PF/VF 硬件架构图
 
-**内容**: 柱状图展示 Intel 82599 网卡的 VF 与 PF 实测性能数据
+#### 5.2 网络模式对比
+- **文件**: `network_modes_comparison.drawio.png`
+- **说明**: 三种网络模式的整体对比
 
-**测试场景**:
-1. 单核单队列 64B 小包：VF 达 PF 的 96.8%
-2. 多核 4 队列 1500B 标准包：VF 达 PF 的 99.0%
-3. 多核 4 队列 9000B 巨帧：VF 达 PF 的 99.0%
-4. 延迟测试（ping RTT）：VF 16µs vs PF 15µs（+6.7%）
+#### 5.3 VF 性能对比
+- **文件**: `vf_performance_comparison.drawio.png`
+- **说明**: VF 直通模式的性能优势
 
-**结论**:
-- VF 吞吐量可达 PF 的 95-99%
-- IOMMU 开销仅 1-3%（延迟 +1µs）
-- 在多核多队列场景下，VF 性能接近物理机
+## 使用说明
 
-**引用位置**: 主文档第四章 4.4 节
+### 查看图示
+所有 `.drawio.png` 文件可以直接在图片查看器中打开，这些文件嵌入了完整的 draw.io XML，可以在 draw.io 中打开并编辑。
 
----
+### 编辑图示
+1. 使用 draw.io 桌面版打开 `.drawio` 或 `.drawio.png` 文件
+2. 编辑后保存为 `.drawio` 格式
+3. 导出为 PNG：
+   ```bash
+   drawio -x -f png -e -s 2 -o <输出文件>.drawio.png <输入文件>.drawio
+   ```
 
-## 文件格式说明
-
-### PNG 格式
-- **预览版**: `*.png` - 用于快速查看
-- **可编辑版**: `*.drawio.png` - 包含嵌入的 XML，可在 draw.io 中重新编辑
-
-### SVG 格式
-- `*.svg` - 矢量图格式，缩放不失真，同样嵌入了可编辑的 XML
-
-### 源文件
-- `*.drawio` - draw.io 原始文件，用于后续修改
-
----
-
-## 如何编辑图示
-
-### 方法 1：draw.io 桌面版
+### 导出命令示例
 ```bash
-# macOS
-open network_modes_comparison.drawio
+# 导出单个图示（嵌入 XML，2倍缩放）
+drawio -x -f png -e -s 2 -o napi-three-modes.drawio.png napi-three-modes.drawio
 
-# Linux
-drawio network_modes_comparison.drawio
-
-# Windows
-start network_modes_comparison.drawio
+# 批量导出所有图示
+for file in *.drawio; do
+  drawio -x -f png -e -s 2 -o "${file%.drawio}.drawio.png" "$file"
+done
 ```
 
-### 方法 2：在线编辑
-1. 访问 https://app.diagrams.net/
-2. 打开 `*.drawio.png` 或 `*.drawio.svg`（嵌入式版本）
-3. 编辑后导出为 PNG/SVG
+## 图示设计规范
 
-### 方法 3：命令行导出
-```bash
-# 导出 PNG（2倍分辨率，嵌入 XML）
-drawio -x -f png -e -s 2 -o output.drawio.png input.drawio
+### 颜色方案
+- **蓝色** (#dae8fc / #6c8ebf): 硬件设备、核心组件
+- **黄色** (#fff2cc / #d6b656): NAPI 实例、中间处理
+- **绿色** (#d5e8d4 / #82b366): 容器、成功状态
+- **橙色** (#ffe6cc / #d79b00): 关键路径、IPvlan 特有机制
+- **紫色** (#e1d5e7 / #9673a6): 系统级资源、per-CPU 结构
+- **红色** (#f8cecc / #b85450): 决策点、瓶颈提示
 
-# 导出 SVG（嵌入 XML）
-drawio -x -f svg -e -o output.svg input.drawio
+### 布局原则
+- 自顶向下流程：硬件 → 驱动 → 协议栈 → 应用
+- 使用泳道（swimlane）区分不同的执行上下文（硬中断、软中断、应用层）
+- 使用动画箭头（`flowAnimation=1`）标识数据流动路径
+- 关键概念使用加粗文本和高亮颜色
 
-# 修复嵌入式 PNG（draw.io CLI bug）
-python3 /path/to/repair_png.py output.drawio.png
-```
+## 版本历史
 
----
+- **v1.0** (2026-06-24): 初始版本，包含 NAPI、协议栈、skb、IPvlan 相关图示
+- 新增 5 个核心图示，覆盖文档的主要技术点
 
-## 图示设计原则
+## 相关文档
 
-### 颜色编码
-- **蓝色 (#dae8fc)**: 容器组件（应用、协议栈）
-- **紫色 (#e1d5e7)**: 宿主机组件（宿主机协议栈）
-- **黄色 (#fff2cc)**: 虚拟化层（IPvlan 虚拟网卡、netns 切换）
-- **橙色 (#ffe6cc)**: VF 驱动
-- **绿色 (#d5e8d4)**: 硬件（物理网卡、VF 硬件队列）
-- **红色 (#f8cecc)**: 性能瓶颈节点（netns 切换、IOMMU）
-
-### 图例说明
-- **实线箭头**: TX 发送路径
-- **虚线箭头**: RX 接收路径
-- **虚线边框**: netns 边界
-
----
-
-## 技术栈
-
-**绘图工具**: draw.io (diagrams.net)  
-**导出引擎**: draw.io Desktop CLI  
-**源码版本**: Linux Kernel 6.6.0  
-**参考网卡**: Intel 82599 / X710, ixgbe/ixgbevf 驱动  
-
----
-
-**文档版本**: 1.0  
-**更新日期**: 2026-06-22  
+- 主文档: `../内核网络知识.md`
+- 对比分析: `../容器网络模式对比分析.md`
+- Redis 实战: `../Redis容器网络模式数据流分析.md`
