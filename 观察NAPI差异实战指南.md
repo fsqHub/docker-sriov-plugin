@@ -194,54 +194,102 @@ interval:s:10 {
 }
 '
 
-# 方法 2：追踪实际的 budget 消耗（需要读取内核变量）
+# 方法 2：追踪实际的 budget 消耗（统计处理的数据包数）
 sudo bpftrace -e '
-#include <linux/netdevice.h>
-
 kprobe:net_rx_action {
-  @budget_start[tid] = karg(1);  // 初始 budget
+  // 初始化本次软中断的累计消耗
+  @budget_used[tid] = 0;
 }
 
-kprobe:napi_poll {
-  @poll_count = count();
+kretprobe:napi_poll {
+  // 获取返回值（实际处理的包数）并累加到当前软中断的总消耗
+  $consumed = retval;
+  if ($consumed > 0 && @budget_used[tid] >= 0) {
+    @budget_used[tid] += $consumed;
+  }
 }
 
 kretprobe:net_rx_action {
-  @budget_consumed = hist(@poll_count);
-  delete(@budget_start[tid]);
+  // 将本次软中断的总消耗记录到直方图
+  if (@budget_used[tid] > 0) {
+    @budget_hist = hist(@budget_used[tid]);
+  }
+  delete(@budget_used[tid]);
 }
 
 interval:s:10 {
-  print(@poll_count);
-  print(@budget_consumed);
-  clear(@budget_consumed);
+  print(@budget_hist);
+  clear(@budget_hist);
 }
 '
 
-# 方法 3：追踪 budget 耗尽导致的退出（更准确）
+# 方法 3：追踪 time_squeeze 事件（budget 耗尽或超时）
 sudo bpftrace -e '
 kprobe:net_rx_action {
-  @rx_action_calls = count();
+  @rx_calls = count();
 }
 
-kprobe:net_rx_action /arg0 <= 0/ {
-  @budget_exhausted = count();
+// 追踪 time_squeeze 计数增加（表示 budget 耗尽或超时）
+kprobe:net_rx_action {
+  $sd = (struct softnet_data *)arg0;
+  @squeeze_before[tid] = $sd->time_squeeze;
+}
+
+kretprobe:net_rx_action /@squeeze_before[tid] >= 0/ {
+  $sd = (struct softnet_data *)arg0;
+  if ($sd->time_squeeze > @squeeze_before[tid]) {
+    @squeeze_events = count();
+  }
+  delete(@squeeze_before[tid]);
 }
 
 interval:s:5 {
-  printf("rx_action calls: %d, budget exhausted: %d (%.2f%%)\n",
-         @rx_action_calls, @budget_exhausted,
-         @budget_exhausted * 100.0 / @rx_action_calls);
-  clear(@rx_action_calls);
-  clear(@budget_exhausted);
+  if (@rx_calls > 0) {
+    $squeeze = @squeeze_events > 0 ? @squeeze_events : 0;
+    printf("rx_action calls: %d, time_squeeze events: %d (%.2f%%)\n",
+           @rx_calls, $squeeze, $squeeze * 100.0 / @rx_calls);
+  }
+  clear(@rx_calls);
+  clear(@squeeze_events);
+}
+'
+
+# 方法 4：简化版 - 直接读取 /proc/net/softnet_stat 的变化（推荐）
+sudo bpftrace -e '
+BEGIN {
+  printf("Monitoring NAPI budget consumption...\n");
+  printf("Press Ctrl+C to stop\n\n");
+}
+
+kprobe:net_rx_action {
+  @rx_action_count = count();
+}
+
+kprobe:napi_poll {
+  @napi_poll_count = count();
+}
+
+interval:s:5 {
+  printf("[%s] rx_action: %d, napi_poll: %d, avg_polls_per_rx: %.2f\n",
+         strftime("%H:%M:%S", nsecs),
+         @rx_action_count, @napi_poll_count,
+         @napi_poll_count * 1.0 / (@rx_action_count > 0 ? @rx_action_count : 1));
+  clear(@rx_action_count);
+  clear(@napi_poll_count);
 }
 '
 ```
 
 **说明**：
 - **方法 1**：测量 `net_rx_action` 的执行时间，间接反映处理负载
-- **方法 2**：统计 NAPI poll 调用次数，反映 budget 分配情况
-- **方法 3**：检测 budget 是否耗尽（最直接的指标）
+- **方法 2**：累计每次软中断中所有 `napi_poll` 的返回值，得到本次软中断实际处理的总包数
+- **方法 3**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
+- **方法 4**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
+
+**推荐使用方法 4**，因为：
+- 不依赖内核数据结构（更可靠）
+- 输出清晰易懂
+- 可以看出 budget 的利用情况（polls_per_rx 越高，说明 budget 利用越充分）
 
 ### 3.2 使用 bcc 工具追踪
 
