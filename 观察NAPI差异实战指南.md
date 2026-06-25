@@ -85,9 +85,16 @@ cat /proc/net/softnet_stat
 # 列 1: processed       - 处理的数据包总数
 # 列 2: dropped         - 丢弃的数据包数
 # 列 3: time_squeeze    - budget 耗尽次数（关键指标）
-# 列 4: cpu_collision   - CPU 冲突次数
-# 列 5: received_rps    - RPS 接收的数据包数
+# 列 4-9: 历史占位字段，Linux 6.6 当前输出为 0
+# 列 10: received_rps   - RPS 接收的数据包数
+# 列 11: flow_limit_count
+# 列 12: input_qlen + process_qlen
+# 列 13: CPU index
+# 列 14: input_qlen
+# 列 15: process_qlen
 ```
+
+**列定义参考来源**：当前 Linux 6.6 的 `/proc/net/softnet_stat` 输出由 `net/core/net-procfs.c` 中的 `softnet_seq_show()` 生成，可对照 `/home/fsq/Desktop/kernel-src/linux-6.6.0-132.0.0.111.oe2403sp3.aarch64/net/core/net-procfs.c:177` 附近的 `seq_printf()` 参数顺序。该实现中第 4-9 列为历史占位 `0`，`received_rps` 是第 10 列。
 
 **实时监控 time_squeeze**：
 ```bash
@@ -649,7 +656,8 @@ interval:s:10 {
 # 方法 2：通过驱动源码查看
 grep -r "netif_napi_add" /path/to/driver/source/
 # 输出示例：
-# netif_napi_add_weight(dev, &q_vector->napi, ixgbe_poll, 64);
+# netif_napi_add(adapter->netdev, &q_vector->napi, ixgbe_poll);
+# 默认 weight 由 include/linux/netdevice.h 中的 NAPI_POLL_WEIGHT=64 提供
 ```
 
 ### 7.4 修改 NAPI weight（高级）
@@ -662,9 +670,8 @@ cd /usr/src/linux-headers-$(uname -r)/drivers/net/ethernet/intel/ixgbe/
 
 # 2. 修改 NAPI 注册代码
 # 找到类似这样的代码：
-# netif_napi_add_weight(adapter->netdev, &q_vector->napi, 
-#                       ixgbe_poll, 64);
-# 改为：
+# netif_napi_add(adapter->netdev, &q_vector->napi, ixgbe_poll);
+# 如果确实要为该驱动自定义 weight，可改为：
 # netif_napi_add_weight(adapter->netdev, &q_vector->napi, 
 #                       ixgbe_poll, 128);  // 增大到 128
 
@@ -797,7 +804,7 @@ paste <(awk '{print $3}' /tmp/before.txt) <(awk '{print $3}' /tmp/after.txt) | \
 
 ## 八、高级分析：内核追踪
 
-### 7.1 使用 ftrace 追踪 NAPI 函数
+### 8.1 使用 ftrace 追踪 NAPI 函数
 
 ```bash
 # 启用 function_graph tracer
@@ -821,7 +828,7 @@ echo 0 > /sys/kernel/debug/tracing/tracing_on
 cat /sys/kernel/debug/tracing/trace | head -100
 ```
 
-### 7.2 使用 perf 分析软中断热点
+### 8.2 使用 perf 分析软中断热点
 
 ```bash
 # 采集 10 秒的软中断事件
@@ -836,7 +843,7 @@ sudo perf script
 
 ---
 
-## 八、总结对比表
+## 九、总结对比表
 
 | 验证项 | IPvlan 模式 | VF 直通模式 | 验证命令 |
 |-------|-----------|-----------|---------|
@@ -849,7 +856,7 @@ sudo perf script
 
 ---
 
-## 九、实战案例：完整验证流程
+## 十、实战案例：完整验证流程
 
 ### 步骤 1：准备环境
 ```bash
@@ -947,8 +954,9 @@ cd drivers/net/ethernet/intel/ixgbe/
 
 # 2. 修改 NAPI 注册代码
 vim ixgbe_main.c
-# 找到 netif_napi_add_weight() 调用，修改 weight 参数
-# 例如：netif_napi_add_weight(..., ixgbe_poll, 128);  // 改为 128
+# Linux 6.6 的 ixgbe/ixgbevf 当前使用 netif_napi_add()
+# 默认 weight 来自 include/linux/netdevice.h 中的 NAPI_POLL_WEIGHT=64
+# 若要自定义该驱动的 weight，可将对应调用改为 netif_napi_add_weight(..., ixgbe_poll, 128)
 
 # 3. 重新编译驱动
 make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
@@ -1035,7 +1043,8 @@ ethtool -C eth1 rx-usecs 10  # 减少中断合并延迟
 
 - Linux 内核文档：`Documentation/networking/scaling.txt`
 - NAPI 源码：`net/core/dev.c`
-- softnet_stat 说明：https://www.kernel.org/doc/Documentation/networking/proc_net_softnet_stat.txt
+- softnet_stat 当前列定义：`net/core/net-procfs.c:softnet_seq_show()`（Linux 6.6 可见 `net-procfs.c:177` 的 `seq_printf()` 字段顺序）
+- softnet_stat 历史说明：https://www.kernel.org/doc/Documentation/networking/proc_net_softnet_stat.txt
 
 ---
 
