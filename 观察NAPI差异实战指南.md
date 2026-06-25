@@ -255,7 +255,7 @@ paste /tmp/squeeze_before.txt /tmp/squeeze_after.txt | awk "{
 grep "@rx_calls" /tmp/bpf_trace.txt
 '
 
-# 方法 4：统计 rx_action 和 napi_poll 比例（推荐）
+# 方法 4：统计 rx_action 和 napi_poll 次数（推荐）
 sudo bpftrace -e '
 BEGIN {
   printf("Monitoring NAPI budget consumption...\n");
@@ -263,20 +263,23 @@ BEGIN {
 }
 
 kprobe:net_rx_action {
-  @rx_action_count = count();
+  @rx_action_count++;
 }
 
 kprobe:napi_poll {
-  @napi_poll_count = count();
+  @napi_poll_count++;
 }
 
 interval:s:5 {
+  $rx = @rx_action_count;
+  $polls = @napi_poll_count;
+
   printf("[%s] rx_action: %d, napi_poll: %d\n",
          strftime("%H:%M:%S", nsecs),
-         @rx_action_count, @napi_poll_count);
+         $rx, $polls);
          
-  if (@rx_action_count > 0) {
-    printf("  avg_polls_per_rx: %d\n", @napi_poll_count / @rx_action_count);
+  if ($rx > 0) {
+    printf("  avg_polls_per_rx: %d\n", $polls / $rx);
   }
   
   clear(@rx_action_count);
