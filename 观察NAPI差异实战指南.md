@@ -229,32 +229,22 @@ kprobe:net_rx_action {
   @rx_calls = count();
 }
 
-// 追踪 time_squeeze 计数增加（表示 budget 耗尽或超时）
-kprobe:net_rx_action {
-  $sd = (struct softnet_data *)arg0;
-  @squeeze_before[tid] = $sd->time_squeeze;
-}
-
-kretprobe:net_rx_action /@squeeze_before[tid] >= 0/ {
-  $sd = (struct softnet_data *)arg0;
-  if ($sd->time_squeeze > @squeeze_before[tid]) {
-    @squeeze_events = count();
-  }
-  delete(@squeeze_before[tid]);
+kretprobe:net_rx_action {
+  // 检查是否有 time_squeeze 发生（通过 /proc/net/softnet_stat 变化判断）
+  // 注意：直接访问 softnet_data 结构体在某些内核版本可能受限
+  @rx_returns = count();
 }
 
 interval:s:5 {
   if (@rx_calls > 0) {
-    $squeeze = @squeeze_events > 0 ? @squeeze_events : 0;
-    printf("rx_action calls: %d, time_squeeze events: %d (%.2f%%)\n",
-           @rx_calls, $squeeze, $squeeze * 100.0 / @rx_calls);
+    printf("rx_action calls: %d\n", @rx_calls);
   }
   clear(@rx_calls);
-  clear(@squeeze_events);
+  clear(@rx_returns);
 }
 '
 
-# 方法 4：简化版 - 直接读取 /proc/net/softnet_stat 的变化（推荐）
+# 方法 4：简化版 - 直接读取调用次数（推荐）
 sudo bpftrace -e '
 BEGIN {
   printf("Monitoring NAPI budget consumption...\n");
@@ -270,10 +260,15 @@ kprobe:napi_poll {
 }
 
 interval:s:5 {
-  printf("[%s] rx_action: %d, napi_poll: %d, avg_polls_per_rx: %.2f\n",
-         strftime("%H:%M:%S", nsecs),
-         @rx_action_count, @napi_poll_count,
-         @napi_poll_count * 1.0 / (@rx_action_count > 0 ? @rx_action_count : 1));
+  $rx = @rx_action_count;
+  $polls = @napi_poll_count;
+  
+  if ($rx > 0) {
+    printf("[%s] rx_action: %d, napi_poll: %d, avg_polls_per_rx: %d\n",
+           strftime("%H:%M:%S", nsecs),
+           $rx, $polls, $polls / $rx);
+  }
+  
   clear(@rx_action_count);
   clear(@napi_poll_count);
 }
