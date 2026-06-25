@@ -19,6 +19,10 @@
 - [四、查看网卡队列和中断亲和性](#四查看网卡队列和中断亲和性)
 - [五、实时负载对比测试](#五实时负载对比测试)
 - [六、验证 NAPI 注册情况](#六验证-napi-注册情况)
+- [七、NAPI 参数调优](#七napi-参数调优)
+- [八、高级分析：内核追踪](#八高级分析内核追踪)
+- [九、总结对比表](#九总结对比表)
+- [十、实战案例：完整验证流程](#十实战案例完整验证流程)
 
 ---
 
@@ -137,7 +141,7 @@ sudo apt install bpftrace
 sudo yum install bpftrace
 ```
 
-**追踪 NAPI poll 调用**：
+**追踪 NAPI poll 调用**：看进程忙不忙
 ```bash
 # 统计每个进程调用 napi_poll 的次数
 sudo bpftrace -e '
@@ -152,7 +156,7 @@ interval:s:5 {
 '
 ```
 
-**追踪 __napi_poll 的 budget 参数**：
+**追踪 __napi_poll 的 budget 参数**：看进程一次干多少活
 ```bash
 # 追踪每次 poll 分配的 budget 值
 sudo bpftrace -e '
@@ -463,7 +467,226 @@ ip -d link show
 
 ---
 
-## 七、高级分析：内核追踪
+## 七、NAPI 参数调优
+
+### 7.1 理解 NAPI weight 与 netdev_budget
+
+#### 关键区别
+
+| 参数 | 作用范围 | 默认值 | 可调整性 | 修改方式 |
+|------|---------|-------|---------|---------|
+| **napi->weight** | 单个 NAPI 实例单次 poll() 的最大数据包数 | 64 | 驱动层设定 | 需重新编译驱动/内核 |
+| **netdev_budget** | 单次软中断的总数据包配额（所有 NAPI 实例共享） | 300 | 运行时可调 | `sysctl -w net.core.netdev_budget=<值>` |
+
+**两者关系**：
+
+```c
+// 内核源码逻辑
+static void net_rx_action(struct softirq_action *h)
+{
+    int budget = READ_ONCE(netdev_budget);  // 全局配额 300
+    
+    for (;;) {
+        struct napi_struct *n = ...;
+        int work = napi_poll(n, &repoll);   // 单个 NAPI 的 weight=64
+        budget -= work;                      // 从全局扣除实际处理数
+        
+        if (budget <= 0) break;              // 全局耗尽就停止
+    }
+}
+```
+
+**重要结论**：
+- ✅ 调整 `netdev_budget` **不会修改** `napi->weight` 的值
+- ✅ `netdev_budget` 决定单次软中断能处理多少轮 NAPI poll
+- ✅ `napi->weight` 决定每轮 poll 最多处理多少个数据包
+
+### 7.2 查看和调整 netdev_budget
+
+```bash
+# 查看当前值
+sysctl net.core.netdev_budget
+sysctl net.core.netdev_budget_usecs
+
+# 临时调整（立即生效，重启失效）
+sudo sysctl -w net.core.netdev_budget=600
+sudo sysctl -w net.core.netdev_budget_usecs=4000
+
+# 永久调整（写入配置文件）
+echo "net.core.netdev_budget = 600" | sudo tee -a /etc/sysctl.conf
+echo "net.core.netdev_budget_usecs = 4000" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+
+# 验证修改效果
+sysctl net.core.netdev_budget
+```
+
+### 7.3 观察当前 NAPI weight 值
+
+```bash
+# 方法 1：使用 bpftrace 追踪
+sudo bpftrace -e '
+kprobe:__napi_poll {
+  $napi = (struct napi_struct *)arg0;
+  @weight[comm] = hist($napi->weight);
+}
+
+interval:s:10 {
+  print(@weight);
+  clear(@weight);
+}
+'
+
+# 方法 2：通过驱动源码查看
+grep -r "netif_napi_add" /path/to/driver/source/
+# 输出示例：
+# netif_napi_add_weight(dev, &q_vector->napi, ixgbe_poll, 64);
+```
+
+### 7.4 修改 NAPI weight（高级）
+
+#### 方法 1：修改驱动源码
+
+```bash
+# 1. 定位驱动源码
+cd /usr/src/linux-headers-$(uname -r)/drivers/net/ethernet/intel/ixgbe/
+
+# 2. 修改 NAPI 注册代码
+# 找到类似这样的代码：
+# netif_napi_add_weight(adapter->netdev, &q_vector->napi, 
+#                       ixgbe_poll, 64);
+# 改为：
+# netif_napi_add_weight(adapter->netdev, &q_vector->napi, 
+#                       ixgbe_poll, 128);  // 增大到 128
+
+# 3. 重新编译和加载驱动
+make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
+sudo rmmod ixgbe
+sudo insmod ixgbe.ko
+
+# 4. 验证修改
+sudo bpftrace -e 'kprobe:__napi_poll { $napi = (struct napi_struct *)arg0; printf("weight=%d\n", $napi->weight); }' | head -5
+```
+
+#### 方法 2：修改内核默认值
+
+```bash
+# 修改内核头文件
+sudo vim /usr/src/linux/include/linux/netdevice.h
+# 找到：#define NAPI_POLL_WEIGHT 64
+# 改为：#define NAPI_POLL_WEIGHT 128
+
+# 重新编译内核（耗时较长）
+cd /usr/src/linux
+make -j$(nproc)
+sudo make modules_install
+sudo make install
+sudo reboot
+```
+
+### 7.5 调优场景和建议
+
+#### 场景 1：IPvlan 多容器，time_squeeze 频繁
+
+**问题表现**：
+```bash
+# 某个 CPU 的 time_squeeze 快速增长
+cat /proc/net/softnet_stat
+# CPU 0: 00012345 00000000 00005678 ...  ← 第3列快速增长
+```
+
+**解决方案（推荐）**：
+```bash
+# 增大 netdev_budget
+sudo sysctl -w net.core.netdev_budget=600
+
+# 或增大时间配额
+sudo sysctl -w net.core.netdev_budget_usecs=4000
+
+# 实时观察效果
+watch -n 1 'cat /proc/net/softnet_stat'
+```
+
+**为什么有效**：
+- 允许单次软中断处理更多数据包
+- 减少因 budget 耗尽导致的 time_squeeze
+
+#### 场景 2：低延迟应用
+
+**需求**：减少网络处理延迟
+
+**解决方案**：
+```bash
+# 减小 netdev_budget
+sudo sysctl -w net.core.netdev_budget=150
+
+# 减小中断合并延迟
+ethtool -C eth0 rx-usecs 10
+```
+
+**权衡**：
+- ✅ 降低延迟
+- ❌ 可能降低吞吐量
+- ❌ 增加 CPU 使用率
+
+#### 场景 3：高吞吐量场景
+
+**需求**：最大化网络吞吐量
+
+**解决方案**：
+```bash
+# 增大 netdev_budget 和时间配额
+sudo sysctl -w net.core.netdev_budget=1000
+sudo sysctl -w net.core.netdev_budget_usecs=8000
+
+# 启用更多网卡队列
+ethtool -L eth0 combined 16
+```
+
+**权衡**：
+- ✅ 提高吞吐量
+- ❌ 可能增加延迟
+- ❌ 占用更多 CPU 时间
+
+#### 场景 4：VF 直通模式优化
+
+**通常不需要调整**：VF 已有独立 NAPI 实例，默认配置即可
+
+**如需优化**：
+```bash
+# 调整 VF 的中断合并参数
+ethtool -C eth1 rx-usecs 20 rx-frames 32
+
+# 绑定 VF 中断到特定 CPU（提高缓存命中率）
+echo 2 > /proc/irq/<VF_IRQ>/smp_affinity_list  # 绑定到 CPU 2
+```
+
+### 7.6 调优效果验证
+
+```bash
+# 1. 记录调优前的基准数据
+cat /proc/net/softnet_stat > /tmp/before.txt
+cat /proc/softirqs | grep NET_RX > /tmp/softirq_before.txt
+
+# 2. 施加负载（运行 60 秒）
+iperf3 -c <target> -t 60 -P 8 &
+
+# 3. 调整参数
+sudo sysctl -w net.core.netdev_budget=600
+
+# 4. 记录调优后的数据
+sleep 60
+cat /proc/net/softnet_stat > /tmp/after.txt
+cat /proc/softirqs | grep NET_RX > /tmp/softirq_after.txt
+
+# 5. 对比 time_squeeze 增长
+paste <(awk '{print $3}' /tmp/before.txt) <(awk '{print $3}' /tmp/after.txt) | \
+  awk '{printf "CPU %d: before=%d after=%d delta=%d\n", NR-1, strtonum("0x"$1), strtonum("0x"$2), strtonum("0x"$2)-strtonum("0x"$1)}'
+```
+
+---
+
+## 八、高级分析：内核追踪
 
 ### 7.1 使用 ftrace 追踪 NAPI 函数
 
@@ -558,8 +781,10 @@ watch -n 1 'paste <(echo "CPU") <(seq 0 $(nproc --all)) <(cat /proc/net/softnet_
 
 ### A. 常用 sysctl 参数
 
+#### A.1 查看和调整参数
+
 ```bash
-# 查看当前 netdev_budget
+# 查看当前 netdev_budget（单次软中断的总数据包配额）
 sysctl net.core.netdev_budget
 # 默认：300
 
@@ -569,6 +794,118 @@ sysctl net.core.netdev_budget_usecs
 
 # 临时调整（测试用）
 sudo sysctl -w net.core.netdev_budget=500
+sudo sysctl -w net.core.netdev_budget_usecs=4000
+
+# 永久生效（写入 /etc/sysctl.conf）
+echo "net.core.netdev_budget = 500" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+#### A.2 NAPI weight 与 netdev_budget 的区别
+
+**关键概念**：
+
+| 参数 | 作用 | 默认值 | 修改方式 |
+|------|-----|-------|---------|
+| **napi->weight** | 单个 NAPI 实例单次 poll() 的最大数据包数 | 64 | 驱动层设定，需重新编译 |
+| **netdev_budget** | 单次软中断的总数据包配额（所有 NAPI 实例共享） | 300 | sysctl 随时调整 |
+
+**两者关系示例**：
+
+```bash
+# 假设 PF 有 4 个 NAPI 实例，weight 都是 64
+# 单次软中断最多处理：min(4 * 64, 300) = 300 个数据包
+
+# 如果增大 netdev_budget 到 500
+sudo sysctl -w net.core.netdev_budget=500
+# 单次软中断最多处理：min(4 * 64, 500) = 256 个数据包
+# （每个 NAPI 实例最多处理 64 个，4 轮后共 256 个）
+```
+
+**重要结论**：
+- **调整 `netdev_budget` 不会修改 `napi->weight`**
+- `netdev_budget` 决定软中断能运行多少轮
+- `napi->weight` 决定每轮处理多少个包
+
+#### A.3 如何调整 NAPI weight
+
+**方法 1：修改驱动源码（需重新编译）**
+
+```bash
+# 1. 获取驱动源码
+git clone <kernel-source>
+cd drivers/net/ethernet/intel/ixgbe/
+
+# 2. 修改 NAPI 注册代码
+vim ixgbe_main.c
+# 找到 netif_napi_add_weight() 调用，修改 weight 参数
+# 例如：netif_napi_add_weight(..., ixgbe_poll, 128);  // 改为 128
+
+# 3. 重新编译驱动
+make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
+
+# 4. 加载新驱动
+sudo rmmod ixgbe
+sudo insmod ixgbe.ko
+```
+
+**方法 2：修改内核默认值（需重新编译内核）**
+
+```bash
+# 修改内核头文件
+vim include/linux/netdevice.h
+# 找到 #define NAPI_POLL_WEIGHT 64
+# 改为 #define NAPI_POLL_WEIGHT 128
+
+# 重新编译内核
+make -j$(nproc)
+make modules_install
+make install
+```
+
+**方法 3：观察当前 weight 值**
+
+```bash
+# 虽然不能运行时修改，但可以通过追踪观察当前值
+sudo bpftrace -e '
+kprobe:__napi_poll {
+  $napi = (struct napi_struct *)arg0;
+  printf("NAPI weight: %d\n", $napi->weight);
+}
+' | head -20
+```
+
+#### A.4 调整建议
+
+**场景 1：IPvlan 多容器高负载，time_squeeze 频繁**
+
+```bash
+# 方案 1：增大 netdev_budget（推荐）
+sudo sysctl -w net.core.netdev_budget=600
+# 效果：允许单次软中断处理更多数据包，减少 time_squeeze
+
+# 方案 2：增大 time_budget
+sudo sysctl -w net.core.netdev_budget_usecs=4000
+# 效果：允许软中断运行更长时间
+
+# 验证效果
+watch -n 1 'cat /proc/net/softnet_stat | awk "{print \$3}"'
+```
+
+**场景 2：低延迟要求**
+
+```bash
+# 减小 netdev_budget
+sudo sysctl -w net.core.netdev_budget=150
+# 效果：减少单次软中断的处理时间，降低延迟
+```
+
+**场景 3：VF 直通模式性能优化**
+
+```bash
+# VF 已经有独立的 NAPI 实例，通常不需要调整
+# 如果仍需优化，可以调整 VF 的中断合并参数
+ethtool -C eth1 rx-usecs 10  # 减少中断合并延迟
 ```
 
 ### B. 故障排查
