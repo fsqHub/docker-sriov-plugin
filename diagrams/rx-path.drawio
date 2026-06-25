@@ -116,7 +116,7 @@
           <mxGeometry x="40" y="40" width="160" height="40" as="geometry"/>
         </mxCell>
 
-        <mxCell id="proto_core" value="__netif_receive_skb_core()&#xa;遍历 rx_handler 链" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="proto_layer">
+        <mxCell id="proto_core" value="__netif_receive_skb_core()&#xa;dev.c:5585 rx_handler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="proto_layer">
           <mxGeometry x="240" y="40" width="200" height="40" as="geometry"/>
         </mxCell>
 

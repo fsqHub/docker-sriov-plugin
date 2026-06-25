@@ -81,7 +81,7 @@
           <mxGeometry x="420" y="80" width="250" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="container_a2_box" value="容器 A netns" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="container_a2_box" value="容器 A 可见 VF0" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="420" y="120" width="280" height="180" as="geometry"/>
         </mxCell>
 
@@ -89,7 +89,7 @@
           <mxGeometry x="70" y="50" width="140" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="vf0_napi" value="VF NAPI 实例 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="container_a2_box">
+        <mxCell id="vf0_napi" value="VF NAPI 实例&#xa;宿主机内核调度" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="container_a2_box">
           <mxGeometry x="70" y="120" width="140" height="40" as="geometry"/>
         </mxCell>
 
@@ -97,11 +97,11 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="cpu0_label" value="中断绑定到 CPU0" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;" vertex="1" parent="1">
-          <mxGeometry x="740" y="190" width="120" height="20" as="geometry" />
+        <mxCell id="cpu0_label" value="MSI-X/IRQ 绑定到 CPU0" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="720" y="190" width="160" height="20" as="geometry" />
         </mxCell>
 
-        <mxCell id="cpu0_sd" value="CPU0 的 softnet_data&#xa;独立消耗 budget=300" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="cpu0_sd" value="CPU0 softnet_data&#xa;本次 net_rx_action budget" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="740" y="220" width="180" height="60" as="geometry"/>
         </mxCell>
 
@@ -109,7 +109,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="container_b2_box" value="容器 B netns" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="container_b2_box" value="容器 B 可见 VF1" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="420" y="330" width="280" height="180" as="geometry"/>
         </mxCell>
 
@@ -117,7 +117,7 @@
           <mxGeometry x="70" y="50" width="140" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="vf1_napi" value="VF NAPI 实例 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="container_b2_box">
+        <mxCell id="vf1_napi" value="VF NAPI 实例&#xa;宿主机内核调度" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="container_b2_box">
           <mxGeometry x="70" y="120" width="140" height="40" as="geometry"/>
         </mxCell>
 
@@ -125,11 +125,11 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="cpu1_label" value="中断绑定到 CPU1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;" vertex="1" parent="1">
-          <mxGeometry x="740" y="400" width="120" height="20" as="geometry" />
+        <mxCell id="cpu1_label" value="MSI-X/IRQ 绑定到 CPU1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="720" y="400" width="160" height="20" as="geometry" />
         </mxCell>
 
-        <mxCell id="cpu1_sd" value="CPU1 的 softnet_data&#xa;独立消耗 budget=300" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="cpu1_sd" value="CPU1 softnet_data&#xa;本次 net_rx_action budget" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="740" y="430" width="180" height="60" as="geometry"/>
         </mxCell>
 
@@ -137,8 +137,8 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="success2" value="✓ 无瓶颈：per-CPU 隔离，各 CPU 独立消耗 300 budget" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="420" y="530" width="500" height="30" as="geometry" />
+        <mxCell id="success2" value="✓ 隔离依赖 IRQ affinity、RPS 和队列绑定；NAPI/softirq 仍由宿主机内核调度" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="530" width="500" height="34" as="geometry" />
         </mxCell>
 
         <!-- Legend -->

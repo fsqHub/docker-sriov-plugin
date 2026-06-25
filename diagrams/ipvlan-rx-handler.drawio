@@ -17,7 +17,7 @@
         </mxCell>
 
         <!-- NAPI Poll -->
-        <mxCell id="napi_poll" value="NAPI poll 处理数据包&#xa;分配 skb，填充数据" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="napi_poll" value="驱动 NAPI poll 处理数据包&#xa;分配 skb 后交给协议栈" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="330" y="200" width="240" height="50" as="geometry" />
         </mxCell>
 
@@ -35,7 +35,7 @@
         </mxCell>
 
         <!-- __netif_receive_skb_core -->
-        <mxCell id="receive_core" value="__netif_receive_skb_core()&#xa;遍历 rx_handler 链" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="receive_core" value="__netif_receive_skb_core()&#xa;net/core/dev.c:5585" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="315" y="370" width="270" height="50" as="geometry" />
         </mxCell>
 
@@ -173,7 +173,7 @@
           <mxGeometry x="20" y="70" width="240" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="key3" value="3. rx_handler 在协议栈入口拦截数据包" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontStyle=1;" vertex="1" parent="key_box">
+        <mxCell id="key3" value="3. rx_handler 在驱动 poll 交给协议栈后执行" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontStyle=1;" vertex="1" parent="key_box">
           <mxGeometry x="20" y="100" width="240" height="30" as="geometry" />
         </mxCell>
 
@@ -198,7 +198,7 @@
           <mxGeometry x="20" y="40" width="240" height="35" as="geometry" />
         </mxCell>
 
-        <mxCell id="src2" value="rx_handler 调用点：&#xa;net/core/dev.c:__netif_receive_skb_core()" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=10;fontFamily=Courier New;" vertex="1" parent="src_box">
+        <mxCell id="src2" value="rx_handler 调用点：&#xa;net/core/dev.c:5585" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=10;fontFamily=Courier New;" vertex="1" parent="src_box">
           <mxGeometry x="20" y="80" width="240" height="35" as="geometry" />
         </mxCell>
 
@@ -207,7 +207,7 @@
         </mxCell>
 
         <!-- Note -->
-        <mxCell id="note" value="注：IPvlan 模式下，所有容器共享 PF 的 NAPI 实例和 netdev_budget，&#xa;数据包分发在 rx_handler 中完成（软中断上下文），无需额外的 NAPI poll。" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="note" value="注：IPvlan 模式下，所有容器共享 PF 的 NAPI 实例和 netdev_budget，&#xa;rx_handler 在驱动 poll 将 skb 交给协议栈后的同一软中断路径中执行。" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="80" y="1360" width="880" height="40" as="geometry" />
         </mxCell>
 
