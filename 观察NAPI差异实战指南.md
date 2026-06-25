@@ -223,28 +223,39 @@ interval:s:10 {
 }
 '
 
-# 方法 3：追踪 time_squeeze 事件（budget 耗尽或超时）
-sudo bpftrace -e '
+# 方法 3：追踪 time_squeeze 事件（通过 /proc 对比）
+# 注意：bpftrace 无法直接访问 softnet_data 结构体的 time_squeeze 字段
+# 建议使用 shell 脚本配合 bpftrace：
+bash -c '
+# 记录初始 time_squeeze 值
+cat /proc/net/softnet_stat | awk "{print \$3}" > /tmp/squeeze_before.txt
+
+# 运行追踪（持续 10 秒）
+timeout 10 sudo bpftrace -e "
 kprobe:net_rx_action {
   @rx_calls = count();
 }
+" > /tmp/bpf_trace.txt 2>&1
 
-kretprobe:net_rx_action {
-  // 检查是否有 time_squeeze 发生（通过 /proc/net/softnet_stat 变化判断）
-  // 注意：直接访问 softnet_data 结构体在某些内核版本可能受限
-  @rx_returns = count();
-}
+# 记录结束后的 time_squeeze 值
+cat /proc/net/softnet_stat | awk "{print \$3}" > /tmp/squeeze_after.txt
 
-interval:s:5 {
-  if (@rx_calls > 0) {
-    printf("rx_action calls: %d\n", @rx_calls);
-  }
-  clear(@rx_calls);
-  clear(@rx_returns);
-}
+# 计算差值
+paste /tmp/squeeze_before.txt /tmp/squeeze_after.txt | awk "{
+  before = strtonum(\"0x\" \$1);
+  after = strtonum(\"0x\" \$2);
+  delta = after - before;
+  printf \"CPU %d: time_squeeze delta = %d\\n\", NR-1, delta;
+  total += delta;
+} END {
+  print \"Total time_squeeze events:\", total;
+}"
+
+# 显示 rx_action 调用次数
+grep "@rx_calls" /tmp/bpf_trace.txt
 '
 
-# 方法 4：简化版 - 直接读取调用次数（推荐）
+# 方法 4：统计 rx_action 和 napi_poll 比例（推荐）
 sudo bpftrace -e '
 BEGIN {
   printf("Monitoring NAPI budget consumption...\n");
@@ -260,13 +271,12 @@ kprobe:napi_poll {
 }
 
 interval:s:5 {
-  $rx = @rx_action_count;
-  $polls = @napi_poll_count;
-  
-  if ($rx > 0) {
-    printf("[%s] rx_action: %d, napi_poll: %d, avg_polls_per_rx: %d\n",
-           strftime("%H:%M:%S", nsecs),
-           $rx, $polls, $polls / $rx);
+  printf("[%s] rx_action: %d, napi_poll: %d\n",
+         strftime("%H:%M:%S", nsecs),
+         @rx_action_count, @napi_poll_count);
+         
+  if (@rx_action_count > 0) {
+    printf("  avg_polls_per_rx: %d\n", @napi_poll_count / @rx_action_count);
   }
   
   clear(@rx_action_count);
