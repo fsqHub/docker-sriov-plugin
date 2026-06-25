@@ -93,7 +93,7 @@ watch -n 1 'cat /proc/net/softnet_stat'
 # 或者计算增量
 while true; do
   echo "=== $(date) ==="
-  awk '{print "CPU", NR-1, "time_squeeze:", "0x" $3}' /proc/net/softnet_stat | \
+  awk '{print "CPU", NR-1, "time_squeeze:", $3}' /proc/net/softnet_stat | \
     while read line; do
       printf "%s (decimal: %d)\n" "$line" $((16#$(echo $line | awk '{print $NF}')))
     done
