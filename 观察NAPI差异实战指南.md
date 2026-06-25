@@ -174,9 +174,9 @@ interval:s:10 {
 '
 ```
 
-**追踪 net_rx_action 中的 budget 消耗**：
+**追踪 net_rx_action 的执行时间和 budget 消耗**：
 ```bash
-# 追踪全局 netdev_budget 的消耗情况
+# 方法 1：追踪 net_rx_action 执行时间（微秒）
 sudo bpftrace -e '
 kprobe:net_rx_action {
   @start_time[tid] = nsecs;
@@ -187,8 +187,61 @@ kretprobe:net_rx_action {
   @duration_hist = hist($elapsed);
   delete(@start_time[tid]);
 }
+
+interval:s:10 {
+  print(@duration_hist);
+  clear(@duration_hist);
+}
+'
+
+# 方法 2：追踪实际的 budget 消耗（需要读取内核变量）
+sudo bpftrace -e '
+#include <linux/netdevice.h>
+
+kprobe:net_rx_action {
+  @budget_start[tid] = karg(1);  // 初始 budget
+}
+
+kprobe:napi_poll {
+  @poll_count = count();
+}
+
+kretprobe:net_rx_action {
+  @budget_consumed = hist(@poll_count);
+  delete(@budget_start[tid]);
+}
+
+interval:s:10 {
+  print(@poll_count);
+  print(@budget_consumed);
+  clear(@budget_consumed);
+}
+'
+
+# 方法 3：追踪 budget 耗尽导致的退出（更准确）
+sudo bpftrace -e '
+kprobe:net_rx_action {
+  @rx_action_calls = count();
+}
+
+kprobe:net_rx_action /arg0 <= 0/ {
+  @budget_exhausted = count();
+}
+
+interval:s:5 {
+  printf("rx_action calls: %d, budget exhausted: %d (%.2f%%)\n",
+         @rx_action_calls, @budget_exhausted,
+         @budget_exhausted * 100.0 / @rx_action_calls);
+  clear(@rx_action_calls);
+  clear(@budget_exhausted);
+}
 '
 ```
+
+**说明**：
+- **方法 1**：测量 `net_rx_action` 的执行时间，间接反映处理负载
+- **方法 2**：统计 NAPI poll 调用次数，反映 budget 分配情况
+- **方法 3**：检测 budget 是否耗尽（最直接的指标）
 
 ### 3.2 使用 bcc 工具追踪
 
