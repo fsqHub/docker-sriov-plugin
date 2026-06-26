@@ -32,12 +32,12 @@
           <mxGeometry x="170" y="130" width="130" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="budget1" value="netdev_budget = 300&#xa;(所有容器共享)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="host_netns1">
-          <mxGeometry x="20" y="200" width="280" height="40" as="geometry"/>
+        <mxCell id="budget1" value="netdev_budget=300&#xa;netdev_budget_usecs=8000us&#xa;同 CPU 软中断窗口竞争" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="host_netns1">
+          <mxGeometry x="20" y="200" width="280" height="60" as="geometry"/>
         </mxCell>
 
         <mxCell id="rxhandler" value="rx_handler: ipvlan_handle_frame()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="host_netns1">
-          <mxGeometry x="50" y="250" width="220" height="20" as="geometry"/>
+          <mxGeometry x="50" y="270" width="220" height="20" as="geometry"/>
         </mxCell>
 
         <mxCell id="edge_pf_napi1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="host_netns1" source="pf_nic" target="napi1">
@@ -101,7 +101,7 @@
           <mxGeometry x="720" y="190" width="160" height="20" as="geometry" />
         </mxCell>
 
-        <mxCell id="cpu0_sd" value="CPU0 softnet_data&#xa;本次 net_rx_action budget" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="cpu0_sd" value="CPU0 softnet_data&#xa;本次 net_rx_action 包数/时间 budget" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="740" y="220" width="180" height="60" as="geometry"/>
         </mxCell>
 
@@ -129,7 +129,7 @@
           <mxGeometry x="720" y="400" width="160" height="20" as="geometry" />
         </mxCell>
 
-        <mxCell id="cpu1_sd" value="CPU1 softnet_data&#xa;本次 net_rx_action budget" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="cpu1_sd" value="CPU1 softnet_data&#xa;本次 net_rx_action 包数/时间 budget" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="740" y="430" width="180" height="60" as="geometry"/>
         </mxCell>
 

@@ -138,7 +138,7 @@
           <mxGeometry x="500" y="380" width="400" height="200" as="geometry"/>
         </mxCell>
 
-        <mxCell id="ops1" value="alloc_skb() - 分配 skb 结构" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="ops_table_box">
+        <mxCell id="ops1" value="alloc_skb()/napi_build_skb() - 分配或构建 skb" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="ops_table_box">
           <mxGeometry x="20" y="40" width="360" height="25" as="geometry"/>
         </mxCell>
 
@@ -163,7 +163,7 @@
           <mxGeometry x="80" y="520" width="380" height="140" as="geometry"/>
         </mxCell>
 
-        <mxCell id="ipvlan_step1" value="1. PF 驱动分配 skb，skb-&gt;data 指向 DMA buffer" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="ipvlan_box">
+        <mxCell id="ipvlan_step1" value="1. PF 驱动构建 skb，skb-&gt;data 指向驱动整理后的数据区域" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="ipvlan_box">
           <mxGeometry x="20" y="40" width="340" height="20" as="geometry" />
         </mxCell>
 
@@ -175,7 +175,7 @@
           <mxGeometry x="20" y="90" width="340" height="20" as="geometry" />
         </mxCell>
 
-        <mxCell id="ipvlan_note" value="✓ 只修改 skb 结构体的 metadata，不拷贝 skb-&gt;data 指向的数据区域" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontStyle=1;" vertex="1" parent="ipvlan_box">
+        <mxCell id="ipvlan_note" value="✓ 主要调整 skb metadata 并转发，通常不做整包数据拷贝" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontStyle=1;" vertex="1" parent="ipvlan_box">
           <mxGeometry x="20" y="110" width="340" height="20" as="geometry" />
         </mxCell>
 
@@ -184,7 +184,7 @@
           <mxGeometry x="80" y="680" width="820" height="60" as="geometry"/>
         </mxCell>
 
-        <mxCell id="note_text" value="关键结论：三种 Docker 网络模式在内核协议栈中都是通过 skb 指针传递，不拷贝数据区域。&#xa;唯一的数据拷贝发生在用户态边界：RX 路径的 read()（skb → 用户态 buffer），TX 路径的 write()（用户态 buffer → skb）。" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="note_text" value="关键结论：三种 Docker 网络模式在内核协议栈中主要通过 skb 指针传递，通常不做整包数据拷贝。&#xa;最明确的数据拷贝发生在普通用户态边界：RX read()/recvmsg()，TX write()/sendmsg()；特殊路径仍可能 clone/copy/linearize。" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="100" y="690" width="780" height="40" as="geometry" />
         </mxCell>
 

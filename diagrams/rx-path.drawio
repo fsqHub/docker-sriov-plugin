@@ -70,16 +70,16 @@
           <mxGeometry x="400" y="40" width="180" height="40" as="geometry"/>
         </mxCell>
 
-        <mxCell id="soft_alloc" value="alloc_skb()&#xa;分配 skb" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="soft_layer">
-          <mxGeometry x="40" y="110" width="120" height="40" as="geometry"/>
+        <mxCell id="soft_alloc" value="napi_build_skb()/napi_alloc_skb()&#xa;构建 skb" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="soft_layer">
+          <mxGeometry x="40" y="110" width="220" height="40" as="geometry"/>
         </mxCell>
 
-        <mxCell id="soft_data" value="skb-&gt;data 指向&#xa;DMA buffer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="soft_layer">
-          <mxGeometry x="200" y="110" width="140" height="40" as="geometry"/>
+        <mxCell id="soft_data" value="skb-&gt;data 指向&#xa;驱动整理后的数据区" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="soft_layer">
+          <mxGeometry x="300" y="110" width="140" height="40" as="geometry"/>
         </mxCell>
 
         <mxCell id="soft_gro" value="napi_gro_receive(skb)&#xa;提交到协议栈" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="soft_layer">
-          <mxGeometry x="380" y="110" width="180" height="40" as="geometry"/>
+          <mxGeometry x="480" y="110" width="180" height="40" as="geometry"/>
         </mxCell>
 
         <mxCell id="soft_edge1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;flowAnimation=1;" edge="1" parent="soft_layer" source="soft_action" target="soft_poll">

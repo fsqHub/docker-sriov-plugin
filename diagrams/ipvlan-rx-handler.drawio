@@ -17,7 +17,7 @@
         </mxCell>
 
         <!-- NAPI Poll -->
-        <mxCell id="napi_poll" value="驱动 NAPI poll 处理数据包&#xa;分配 skb 后交给协议栈" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="napi_poll" value="驱动 NAPI poll 处理数据包&#xa;构建 skb 后交给协议栈" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="330" y="200" width="240" height="50" as="geometry" />
         </mxCell>
 
@@ -207,7 +207,7 @@
         </mxCell>
 
         <!-- Note -->
-        <mxCell id="note" value="注：IPvlan 模式下，所有容器共享 PF 的 NAPI 实例和 netdev_budget，&#xa;rx_handler 在驱动 poll 将 skb 交给协议栈后的同一软中断路径中执行。" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="note" value="注：IPvlan 模式下，容器共享 PF 的 NAPI 实例；同 CPU 本轮 net_rx_action()&#xa;共同消耗 netdev_budget 和 netdev_budget_usecs。rx_handler 在同一软中断路径中执行。" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="80" y="1360" width="880" height="40" as="geometry" />
         </mxCell>
 
