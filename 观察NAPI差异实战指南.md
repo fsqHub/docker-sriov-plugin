@@ -286,7 +286,7 @@ paste /tmp/squeeze_before.txt /tmp/squeeze_after.txt | awk "{
 grep "@rx_calls" /tmp/bpf_trace.txt
 '
 
-# 方法 5：统计 每次rx_action 和 napi_poll 次数（推荐）
+# 方法 5：统计 每次net_rx_action 和 napi_poll 次数（推荐）
 sudo bpftrace -e '
 BEGIN {
   printf("Monitoring NAPI budget consumption...\n");
