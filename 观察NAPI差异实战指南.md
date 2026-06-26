@@ -148,7 +148,7 @@ sudo apt install bpftrace
 sudo yum install bpftrace
 ```
 
-**追踪 NAPI poll 调用**：看进程忙不忙
+**追踪 各进程 NAPI poll 调用次数**：看进程忙不忙
 ```bash
 # 统计每个进程调用 napi_poll 的次数
 sudo bpftrace -e '
@@ -163,7 +163,7 @@ interval:s:5 {
 '
 ```
 
-**追踪 __napi_poll 的 budget 参数**：看进程一次干多少活
+**追踪 每次__napi_poll 的 budget 参数**：看进程一次干多少活
 ```bash
 # 追踪每次 poll 分配的 budget 值
 sudo bpftrace -e '
@@ -181,9 +181,9 @@ interval:s:10 {
 '
 ```
 
-**追踪 net_rx_action 的执行时间和 budget 消耗**：
+**追踪 每次 net_rx_action 的执行时间和 budget 消耗**：
 ```bash
-# 方法 1：追踪 net_rx_action 执行时间（微秒）
+# 方法 1：追踪每次 net_rx_action 执行时间（微秒）
 sudo bpftrace -e '
 kprobe:net_rx_action {
   @start_time[tid] = nsecs;
@@ -201,7 +201,7 @@ interval:s:10 {
 }
 '
 
-# 方法 2：追踪实际的 budget 消耗（统计处理的数据包数）
+# 方法 2：追踪每次 net_rx_action 实际的 budget 消耗（统计处理的数据包数）
 sudo bpftrace -e '
 kprobe:net_rx_action {
   // 初始化本次软中断的累计消耗
@@ -262,7 +262,7 @@ paste /tmp/squeeze_before.txt /tmp/squeeze_after.txt | awk "{
 grep "@rx_calls" /tmp/bpf_trace.txt
 '
 
-# 方法 4：统计 rx_action 和 napi_poll 次数（推荐）
+# 方法 4：统计 每次rx_action 和 napi_poll 次数（推荐）
 sudo bpftrace -e '
 BEGIN {
   printf("Monitoring NAPI budget consumption...\n");
