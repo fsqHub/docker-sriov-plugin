@@ -152,6 +152,8 @@ cat /proc/net/softnet_stat | awk '{
 
 ### 3.1 使用 bpftrace 追踪 napi_poll
 
+下面几个**周期性输出直方图**的示例，统一改成“每 10 秒输出 1 次，默认输出 3 次后自动退出”。如需调整输出次数，修改脚本中的 `@max_rounds` 即可。
+
 **安装**：
 ```bash
 # Ubuntu/Debian
@@ -180,6 +182,11 @@ interval:s:5 {
 ```bash
 # 追踪每次 poll 分配的 budget 值
 sudo bpftrace -e '
+BEGIN {
+  @max_rounds = 3;
+  @round = 0;
+}
+
 kprobe:__napi_poll {
   $napi = (struct napi_struct *)arg0;
   $weight = $napi->weight;
@@ -188,8 +195,24 @@ kprobe:__napi_poll {
 }
 
 interval:s:10 {
+  // 每 10 秒输出一次，累计输出 3 次后自动退出
   print(@budget_hist);
   print(@budget_avg);
+
+  clear(@budget_hist);
+  clear(@budget_avg);
+
+  @round = @round + 1;
+  if (@round >= @max_rounds) {
+    exit();
+  }
+}
+
+END {
+  clear(@budget_hist);
+  clear(@budget_avg);
+  clear(@round);
+  clear(@max_rounds);
 }
 '
 ```
@@ -222,6 +245,11 @@ interval:s:10 {
 
 # 方法 2：追踪每次 net_rx_action 执行时间（微秒）
 sudo bpftrace -e '
+BEGIN {
+  @max_rounds = 3;
+  @round = 0;
+}
+
 kprobe:net_rx_action {
   @start_time[tid] = nsecs;
 }
@@ -233,13 +261,31 @@ kretprobe:net_rx_action {
 }
 
 interval:s:10 {
+  // 每 10 秒输出一次，累计输出 3 次后自动退出
   print(@duration_hist);
   clear(@duration_hist);
+
+  @round = @round + 1;
+  if (@round >= @max_rounds) {
+    exit();
+  }
+}
+
+END {
+  clear(@start_time);
+  clear(@duration_hist);
+  clear(@round);
+  clear(@max_rounds);
 }
 '
 
 # 方法 3：估算每次 net_rx_action 内累计的 napi_poll work（非严格 budget 上限）
 sudo bpftrace -e '
+BEGIN {
+  @max_rounds = 3;
+  @round = 0;
+}
+
 kprobe:net_rx_action {
   // 初始化本次软中断的累计消耗
   @budget_used[tid] = 0;
@@ -262,8 +308,21 @@ kretprobe:net_rx_action {
 }
 
 interval:s:10 {
+  // 每 10 秒输出一次，累计输出 3 次后自动退出
   print(@budget_hist);
   clear(@budget_hist);
+
+  @round = @round + 1;
+  if (@round >= @max_rounds) {
+    exit();
+  }
+}
+
+END {
+  clear(@budget_used);
+  clear(@budget_hist);
+  clear(@round);
+  clear(@max_rounds);
 }
 '
 
@@ -271,7 +330,9 @@ interval:s:10 {
 sudo bpftrace -e '
 BEGIN {
   printf("Tracing per net_rx_action budget/time histograms...\n");
-  printf("Press Ctrl+C to stop\n\n");
+  printf("Will stop after 3 interval prints by default\n\n");
+  @max_rounds = 3;
+  @round = 0;
 }
 
 kprobe:net_rx_action {
@@ -321,6 +382,7 @@ kretprobe:net_rx_action /@active[cpu]/ {
 }
 
 interval:s:10 {
+  // 每 10 秒输出一次，累计输出 3 次后自动退出
   printf("\n=== net_rx_action budget/time histograms ===\n");
   print(@work_used_hist);
   print(@elapsed_us_hist);
@@ -335,6 +397,28 @@ interval:s:10 {
   clear(@polls_per_rx_hist);
   clear(@budget_exhausted);
   clear(@time_exhausted);
+
+  @round = @round + 1;
+  if (@round >= @max_rounds) {
+    exit();
+  }
+}
+
+END {
+  clear(@active);
+  clear(@start_ns);
+  clear(@work_used);
+  clear(@polls);
+  clear(@entry_budget);
+  clear(@entry_usecs);
+  clear(@work_used_hist);
+  clear(@elapsed_us_hist);
+  clear(@time_used_pct_hist);
+  clear(@polls_per_rx_hist);
+  clear(@budget_exhausted);
+  clear(@time_exhausted);
+  clear(@round);
+  clear(@max_rounds);
 }
 '
 
