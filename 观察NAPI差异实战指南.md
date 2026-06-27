@@ -133,6 +133,19 @@ cat /proc/net/softnet_stat | awk '{
 }'
 ```
 
+**budget 或时间配额耗尽后的行为**：
+
+- 本轮 `net_rx_action()` 停止继续 poll，不会在同一轮软中断里无限处理网络包。
+- 未处理完的 NAPI 不会直接丢弃；内核会把未完成的 `list`、`repoll` 以及期间新调度进来的 `sd->poll_list` 合并回当前 CPU 的 `softnet_data.poll_list`。
+- 如果 `softnet_data.poll_list` 仍非空，内核会再次触发 `NET_RX_SOFTIRQ`，下一轮继续处理；后续可能继续在当前上下文运行，也可能被推给 `ksoftirqd/N`（tid 便会发生变化）。
+- `time_squeeze` 会递增，这是观察 budget 或时间窗口频繁耗尽的关键指标。
+
+`★ Insight ─────────────────────────────────────`
+- `time_squeeze` 不是丢包数，而是“本轮软中断没能在预算内处理完”的次数。
+- 偶发增长说明内核在做软中断限流；持续快速增长通常意味着 RX 路径处理能力追不上包到达速度。
+- 长期积压可能进一步表现为延迟升高、`ksoftirqd` 占用升高、`/proc/net/softnet_stat` dropped 增长、网卡 ring drop 或协议层重传。
+`─────────────────────────────────────────────────`
+
 ---
 
 ## 三、使用 eBPF 追踪 NAPI 处理
@@ -225,7 +238,7 @@ interval:s:10 {
 }
 '
 
-# 方法 3：追踪每次 net_rx_action 实际的 budget 消耗（统计处理的数据包数）
+# 方法 3：估算每次 net_rx_action 内累计的 napi_poll work（非严格 budget 上限）
 sudo bpftrace -e '
 kprobe:net_rx_action {
   // 初始化本次软中断的累计消耗
@@ -254,7 +267,78 @@ interval:s:10 {
 }
 '
 
-# 方法 4：追踪 time_squeeze 事件（通过 /proc 对比）
+# 方法 4：统计每次 net_rx_action 实际消耗的 budget 和时间配额直方图（推荐）
+sudo bpftrace -e '
+BEGIN {
+  printf("Tracing per net_rx_action budget/time histograms...\n");
+  printf("Press Ctrl+C to stop\n\n");
+}
+
+kprobe:net_rx_action {
+  // net_rx_action 在单个 CPU 的软中断上下文中运行，用 cpu 作为本轮窗口 key
+  @active[cpu] = 1;
+  @start_ns[cpu] = nsecs;
+  @work_used[cpu] = 0;
+  @polls[cpu] = 0;
+  @entry_budget[cpu] = *(int32 *)kaddr("netdev_budget");
+  @entry_usecs[cpu] = *(uint32 *)kaddr("netdev_budget_usecs");
+}
+
+tracepoint:napi:napi_poll /@active[cpu]/ {
+  // args->work 是本次 NAPI poll 实际处理的包数
+  @work_used[cpu] += args->work;
+  @polls[cpu]++;
+}
+
+kretprobe:net_rx_action /@active[cpu]/ {
+  $elapsed_us = (nsecs - @start_ns[cpu]) / 1000;
+  $work = @work_used[cpu];
+  $budget = @entry_budget[cpu];
+  $usecs = @entry_usecs[cpu];
+
+  // 每次 net_rx_action() 返回时，只更新分布，不逐次打印明细
+  @work_used_hist = hist($work);
+  @elapsed_us_hist = hist($elapsed_us);
+  @polls_per_rx_hist = hist(@polls[cpu]);
+
+  if ($usecs > 0) {
+    @time_used_pct_hist = hist($elapsed_us * 100 / $usecs);
+    if ($elapsed_us >= $usecs) {
+      @time_exhausted = count();
+    }
+  }
+
+  if ($work >= $budget) {
+    @budget_exhausted = count();
+  }
+
+  delete(@active[cpu]);
+  delete(@start_ns[cpu]);
+  delete(@work_used[cpu]);
+  delete(@polls[cpu]);
+  delete(@entry_budget[cpu]);
+  delete(@entry_usecs[cpu]);
+}
+
+interval:s:10 {
+  printf("\n=== net_rx_action budget/time histograms ===\n");
+  print(@work_used_hist);
+  print(@elapsed_us_hist);
+  print(@time_used_pct_hist);
+  print(@polls_per_rx_hist);
+  print(@budget_exhausted);
+  print(@time_exhausted);
+
+  clear(@work_used_hist);
+  clear(@elapsed_us_hist);
+  clear(@time_used_pct_hist);
+  clear(@polls_per_rx_hist);
+  clear(@budget_exhausted);
+  clear(@time_exhausted);
+}
+'
+
+# 方法 5：追踪 time_squeeze 事件（通过 /proc 对比）
 # 注意：bpftrace 无法直接访问 softnet_data 结构体的 time_squeeze 字段
 # 建议使用 shell 脚本配合 bpftrace：
 bash -c '
@@ -286,7 +370,7 @@ paste /tmp/squeeze_before.txt /tmp/squeeze_after.txt | awk "{
 grep "@rx_calls" /tmp/bpf_trace.txt
 '
 
-# 方法 5：统计 每次net_rx_action 和 napi_poll 次数（推荐）
+# 方法 6：统计每次 net_rx_action 和 napi_poll 次数（快速粗略观测）
 sudo bpftrace -e '
 BEGIN {
   printf("Monitoring NAPI budget consumption...\n");
@@ -322,17 +406,26 @@ interval:s:5 {
 **说明**：
 - **方法 1**：在 `net_rx_action` 入口读取 `netdev_budget` 和 `netdev_budget_usecs` 全局变量，确认每次软中断拿到的初始包数和时间配额
 - **方法 2**：测量 `net_rx_action` 的执行时间，间接反映处理负载
-- **方法 3**：累计每次软中断中所有 `napi_poll` 的返回值，得到本次软中断实际处理的总包数
-- **方法 4**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
-- **方法 5**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
+- **方法 3**：用 `kretprobe:napi_poll` 累计返回值来估算本轮软中断处理的 work，总数可能超过 `netdev_budget`
+- **方法 4**：用 `cpu` 限定本轮 `net_rx_action()` 窗口，并通过 `tracepoint:napi:napi_poll` 累计 `args->work`，周期性输出实际 budget 消耗、实际耗时、时间配额占比和 poll 次数直方图
+- **方法 5**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
+- **方法 6**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
 
 `★ Insight ─────────────────────────────────────`
 - `netdev_budget` 是 `net_rx_action()` 入口读取的总包数配额；脚本读的是入口初始值，不是循环执行后剩余的局部 `budget`。
 - `netdev_budget_usecs` 是同一轮软中断的时间窗口，和包数配额共同决定本轮 NAPI poll 何时让出 CPU。
+- 方法 3 的累计值不是严格上限：`net_rx_action()` 先执行一次 `napi_poll()`，再扣减并判断 `budget <= 0`，所以默认 `netdev_budget=300`、`napi->weight=64` 时，单轮可能出现 `320` 这类正常超限值。
+- 如果方法 3 出现 `1k-2k`，通常不是单轮 `netdev_budget` 真的放大，而是 `tid` 归集、kprobe 丢事件、softirq/ksoftirqd 执行上下文或其他 NAPI poll 路径混入，导致多轮 poll work 被累加到同一个桶。
+- 方法 4 的统计口径更接近源码：`net_rx_action()` 在当前 CPU 运行期间，`napi:napi_poll` tracepoint 暴露的 `work` 就是本轮从全局包数 budget 中扣减的实际处理量；`elapsed_us_hist` 和 `time_used_pct_hist` 可直接观察本轮实际时间消耗及其相对 `netdev_budget_usecs` 的占比。
 - 如果 `kaddr()` 报符号不可见，优先检查 `/proc/kallsyms` 权限、`kernel.kptr_restrict` 和 bpftrace 是否具备 root 权限。
 `─────────────────────────────────────────────────`
 
-**推荐使用方法 5**，因为：
+**推荐使用方法 4**，因为：
+- 能用直方图同时观察单轮 `net_rx_action()` 的实际包数消耗和时间消耗分布
+- 使用 `cpu` 关联软中断执行窗口，比用 `tid` 归集更贴近 per-CPU `softnet_data` 模型
+- `tracepoint:napi:napi_poll` 直接提供 `work` 字段，比从 `kretprobe:napi_poll` 反推更清晰
+
+**快速粗略观察可使用方法 6**，因为：
 - 不依赖内核数据结构（更可靠）
 - 输出清晰易懂
 - 可以看出 budget 的利用情况（polls_per_rx 越高，说明 budget 利用越充分）
