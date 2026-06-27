@@ -339,7 +339,7 @@ kprobe:net_rx_action {
   // net_rx_action 在单个 CPU 的软中断上下文中运行，用 cpu 作为本轮窗口 key
   @active[cpu] = 1;
   @start_ns[cpu] = nsecs;
-  @work_used[cpu] = 0;
+  @budget_used[cpu] = 0;
   @polls[cpu] = 0;
   @entry_budget[cpu] = *(int32 *)kaddr("netdev_budget");
   @entry_usecs[cpu] = *(uint32 *)kaddr("netdev_budget_usecs");
@@ -347,18 +347,18 @@ kprobe:net_rx_action {
 
 tracepoint:napi:napi_poll /@active[cpu]/ {
   // args->work 是本次 NAPI poll 实际处理的包数
-  @work_used[cpu] += args->work;
+  @budget_used[cpu] += args->work;
   @polls[cpu]++;
 }
 
 kretprobe:net_rx_action /@active[cpu]/ {
   $elapsed_us = (nsecs - @start_ns[cpu]) / 1000;
-  $work = @work_used[cpu];
+  $work = @budget_used[cpu];
   $budget = @entry_budget[cpu];
   $usecs = @entry_usecs[cpu];
 
   // 每次 net_rx_action() 返回时，只更新分布，不逐次打印明细
-  @work_used_hist = hist($work);
+  @budget_used_hist = hist($work);
   @elapsed_us_hist = hist($elapsed_us);
   @polls_per_rx_hist = hist(@polls[cpu]);
 
@@ -375,7 +375,7 @@ kretprobe:net_rx_action /@active[cpu]/ {
 
   delete(@active[cpu]);
   delete(@start_ns[cpu]);
-  delete(@work_used[cpu]);
+  delete(@budget_used[cpu]);
   delete(@polls[cpu]);
   delete(@entry_budget[cpu]);
   delete(@entry_usecs[cpu]);
@@ -384,14 +384,14 @@ kretprobe:net_rx_action /@active[cpu]/ {
 interval:s:10 {
   // 每 10 秒输出一次，累计输出 3 次后自动退出
   printf("\n=== net_rx_action budget/time histograms ===\n");
-  print(@work_used_hist);
+  print(@budget_used_hist);
   print(@elapsed_us_hist);
   print(@time_used_pct_hist);
   print(@polls_per_rx_hist);
   print(@budget_exhausted);
   print(@time_exhausted);
 
-  clear(@work_used_hist);
+  clear(@budget_used_hist);
   clear(@elapsed_us_hist);
   clear(@time_used_pct_hist);
   clear(@polls_per_rx_hist);
@@ -407,11 +407,11 @@ interval:s:10 {
 END {
   clear(@active);
   clear(@start_ns);
-  clear(@work_used);
+  clear(@budget_used);
   clear(@polls);
   clear(@entry_budget);
   clear(@entry_usecs);
-  clear(@work_used_hist);
+  clear(@budget_used_hist);
   clear(@elapsed_us_hist);
   clear(@time_used_pct_hist);
   clear(@polls_per_rx_hist);
