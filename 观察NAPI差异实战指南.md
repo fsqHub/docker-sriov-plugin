@@ -428,7 +428,101 @@ END {
 }
 '
 
-# 方法 5：追踪 time_squeeze 事件（通过 /proc 对比）
+# 方法 5：按 PF/VF 设备统计 net_rx_action 触达次数和处理 CPU
+sudo bpftrace -e '
+BEGIN {
+  printf("Tracing net_rx_action by NAPI device and CPU...\n");
+  printf("Will print every 3 seconds and stop after 3 interval prints by default\n\n");
+  @max_rounds = 3;
+  @round = 0;
+}
+
+kprobe:net_rx_action {
+  // net_rx_action 本身没有设备参数，只能先记录当前 CPU 正在处理 softirq 窗口
+  @active[cpu] = 1;
+
+  // 为每个 CPU 上的 net_rx_action 生成递增序号，用来区分同 CPU 上不同轮次
+  @rx_seq[cpu]++;
+
+  // 统计 3 秒窗口内每个 CPU 进入 net_rx_action() 的总次数
+  @rx_action_total[cpu] = count();
+}
+
+tracepoint:napi:napi_poll /@active[cpu]/ {
+  // napi_poll tracepoint 暴露 dev_name、work、budget，可用于把 softirq 窗口归因到 PF/VF 设备
+  $dev = str(args->dev_name);
+  $seq = @rx_seq[cpu];
+
+  /*
+   * 同一次 net_rx_action 可能多次 poll 同一设备。
+   * 这里按 dev,cpu 对每轮 net_rx_action 只计 1 次，表示“这轮触达过该设备”。
+   */
+  if (@seen[cpu, $dev] != $seq) {
+    @rx_action_by_dev_cpu[$dev, cpu] = count();
+    @seen[cpu, $dev] = $seq;
+  }
+
+  // 观察 3 秒窗口内某设备由哪些 CPU 处理过；看 key 即可得到 CPU 集合
+  @dev_seen_on_cpu[$dev, cpu] = count();
+
+  // 辅助判断：同一设备在各 CPU 上的 NAPI poll 次数、RX work 和传入 poll 的 budget
+  @napi_poll_by_dev_cpu[$dev, cpu] = count();
+  @work_by_dev_cpu[$dev, cpu] = sum(args->work);
+  @budget_by_dev_cpu[$dev, cpu] = sum(args->budget);
+}
+
+kretprobe:net_rx_action /@active[cpu]/ {
+  delete(@active[cpu]);
+}
+
+interval:s:3 {
+  printf("\n=== net_rx_action total by CPU ===\n");
+  print(@rx_action_total);
+
+  printf("\n=== net_rx_action touched device by dev,cpu ===\n");
+  print(@rx_action_by_dev_cpu);
+
+  printf("\n=== device handled by CPUs in this window ===\n");
+  print(@dev_seen_on_cpu);
+
+  printf("\n=== napi_poll count by dev,cpu ===\n");
+  print(@napi_poll_by_dev_cpu);
+
+  printf("\n=== RX work by dev,cpu ===\n");
+  print(@work_by_dev_cpu);
+
+  printf("\n=== NAPI budget passed to poll by dev,cpu ===\n");
+  print(@budget_by_dev_cpu);
+
+  clear(@rx_action_total);
+  clear(@rx_action_by_dev_cpu);
+  clear(@dev_seen_on_cpu);
+  clear(@napi_poll_by_dev_cpu);
+  clear(@work_by_dev_cpu);
+  clear(@budget_by_dev_cpu);
+
+  @round = @round + 1;
+  if (@round >= @max_rounds) {
+    exit();
+  }
+}
+
+END {
+  clear(@active);
+  clear(@rx_seq);
+  clear(@seen);
+  clear(@rx_action_total);
+  clear(@rx_action_by_dev_cpu);
+  clear(@dev_seen_on_cpu);
+  clear(@napi_poll_by_dev_cpu);
+  clear(@work_by_dev_cpu);
+  clear(@budget_by_dev_cpu);
+  clear(@round);
+  clear(@max_rounds);
+}
+'
+
+# 方法 6：追踪 time_squeeze 事件（通过 /proc 对比）
 # 注意：bpftrace 无法直接访问 softnet_data 结构体的 time_squeeze 字段
 # 建议使用 shell 脚本配合 bpftrace：
 bash -c '
@@ -460,7 +554,7 @@ paste /tmp/squeeze_before.txt /tmp/squeeze_after.txt | awk "{
 grep "@rx_calls" /tmp/bpf_trace.txt
 '
 
-# 方法 6：统计每次 net_rx_action 和 napi_poll 次数（快速粗略观测）
+# 方法 7：统计每次 net_rx_action 和 napi_poll 次数（快速粗略观测）
 sudo bpftrace -e '
 BEGIN {
   printf("Monitoring NAPI budget consumption...\n");
@@ -498,8 +592,9 @@ interval:s:5 {
 - **方法 2**：测量 `net_rx_action` 的执行时间，间接反映处理负载
 - **方法 3**：用 `kretprobe:napi_poll` 累计返回值来估算本轮软中断处理的 work，总数可能超过 `netdev_budget`
 - **方法 4**：用 `cpu` 限定本轮 `net_rx_action()` 窗口，并通过 `tracepoint:napi:napi_poll` 累计 `args->work`，周期性输出 `net_rx_action()` 调用次数、实际 budget 消耗、实际耗时、时间配额占比和 poll 次数直方图
-- **方法 5**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
-- **方法 6**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
+- **方法 5**：按 `napi:napi_poll` 的 `dev_name` 把 `net_rx_action()` 触达过的 PF/VF 设备归因到具体 CPU，观察每个设备在 3 秒窗口内由哪些 CPU 处理、触达过多少轮软中断、累计多少 RX work
+- **方法 6**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
+- **方法 7**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
 
 **关于方法 4 中 `budget_used=0` 的解释**：
 - `budget_used=0` 表示本轮 `net_rx_action()` 窗口里，`napi:napi_poll` tracepoint 暴露的 `args->work` 累加值为 0；它只说明没有发生可计入 RX budget 扣减的 work。
@@ -523,7 +618,14 @@ interval:s:5 {
 - 使用 `cpu` 关联软中断执行窗口，比用 `tid` 归集更贴近 per-CPU `softnet_data` 模型
 - `tracepoint:napi:napi_poll` 直接提供 `work` 字段，比从 `kretprobe:napi_poll` 反推更清晰
 
-**快速粗略观察可使用方法 6**，因为：
+**需要观察 PF/VF 设备与 CPU 关系时，使用方法 5**：
+- `@rx_action_total[cpu]` 表示 3 秒窗口内每个 CPU 进入 `net_rx_action()` 的总次数
+- `@rx_action_by_dev_cpu[dev,cpu]` 表示某设备在某 CPU 上被多少轮 `net_rx_action()` 触达过；同一轮里同一设备多次 poll 只计 1 次
+- `@dev_seen_on_cpu[dev,cpu]` 用来回答“3 秒内某设备被哪些 CPU 处理过”，看 key 即可得到 CPU 集合
+- `@napi_poll_by_dev_cpu[dev,cpu]`、`@work_by_dev_cpu[dev,cpu]`、`@budget_by_dev_cpu[dev,cpu]` 用来辅助判断该设备在对应 CPU 上的 poll 次数、RX work 和 poll budget 规模
+- 注意：同一次 `net_rx_action()` 可能触达多个设备，所以按设备维度求和可能大于 `@rx_action_total`，不能把它理解为严格所有权
+
+**快速粗略观察可使用方法 7**，因为：
 - 不依赖内核数据结构（更可靠）
 - 输出清晰易懂
 - 可以看出 budget 的利用情况（polls_per_rx 越高，说明 budget 利用越充分）
