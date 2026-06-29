@@ -522,10 +522,10 @@ END {
 }
 '
 
-# 方法 6：按 dst-ip 统计 net_rx_action 处理 CPU 集合
+# 方法 6：按 Redis/TCP dst-ip 统计 net_rx_action 处理 CPU 集合（推荐用于 Redis 压测）
 sudo bpftrace -e '
 BEGIN {
-  printf("Tracing dst-ip handled by net_rx_action CPUs...\n");
+  printf("Tracing TCP dst-ip handled by net_rx_action CPUs...\n");
   printf("Will print every 3 seconds and stop after 3 interval prints by default\n\n");
   @max_rounds = 3;
   @round = 0;
@@ -536,8 +536,11 @@ kprobe:net_rx_action {
   @active[cpu] = 1;
 }
 
-kprobe:ip_rcv /@active[cpu]/ {
-  // ip_rcv 只处理 IPv4 入站 skb，arg0 是 struct sk_buff *
+kprobe:tcp_v4_rcv /@active[cpu]/ {
+  /*
+   * Redis 使用 TCP。挂 tcp_v4_rcv 可以避开 IPv4 层 ip_rcv/ip_list_rcv
+   * 的分叉，在 IPv4 TCP 包进入 TCP 栈时统一抓取 skb。
+   */
   $skb = (struct sk_buff *)arg0;
 
   // ip_hdr(skb) 等价于 skb->head + skb->network_header
@@ -660,7 +663,7 @@ interval:s:5 {
 - **方法 3**：用 `kretprobe:napi_poll` 累计返回值来估算本轮软中断处理的 work，总数可能超过 `netdev_budget`
 - **方法 4**：用 `cpu` 限定本轮 `net_rx_action()` 窗口，并通过 `tracepoint:napi:napi_poll` 累计 `args->work`，周期性输出 `net_rx_action()` 调用次数、实际 budget 消耗、实际耗时、时间配额占比和 poll 次数直方图
 - **方法 5**：按 `napi:napi_poll` 的 `dev_name` 把 `net_rx_action()` 触达过的 PF/VF 设备归因到具体 CPU，观察每个设备在 3 秒窗口内由哪些 CPU 处理、触达过多少轮软中断、累计多少 RX work
-- **方法 6**：在 `net_rx_action()` 活跃窗口内从 IPv4 入站路径 `ip_rcv` 抓取 `dst-ip`，只输出 `dst-ip -> CPU` 和 `CPU -> dst-ip` 两类集合关系
+- **方法 6**：在 `net_rx_action()` 活跃窗口内从 IPv4 TCP 路径 `tcp_v4_rcv` 抓取 `dst-ip`，只输出 `dst-ip -> CPU` 和 `CPU -> dst-ip` 两类集合关系，推荐用于 Redis 压测
 - **方法 7**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
 - **方法 8**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
 
@@ -693,12 +696,39 @@ interval:s:5 {
 - `@napi_poll_by_dev_cpu[dev,cpu]`、`@work_by_dev_cpu[dev,cpu]`、`@budget_by_dev_cpu[dev,cpu]` 用来辅助判断该设备在对应 CPU 上的 poll 次数、RX work 和 poll budget 规模
 - 注意：同一次 `net_rx_action()` 可能触达多个设备，所以按设备维度求和可能大于 `@rx_action_total`，不能把它理解为严格所有权
 
-**需要观察 dst-ip 与处理 CPU 关系时，使用方法 6**：
+**需要观察 Redis/TCP dst-ip 与处理 CPU 关系时，使用方法 6**：
 - `@dst_ip_handled_by_cpu[dst,cpu]` 表示某个 IPv4 目的地址在 3 秒窗口内被哪些 CPU 的 `net_rx_action()` 处理过
 - `@cpu_handled_dst_ip[cpu,dst]` 表示某个 CPU 的 `net_rx_action()` 在 3 秒窗口内涉及过哪些 IPv4 目的地址
 - 该方法只表达集合关系，map 的 value 固定为 `1`，不要把它解读为 skb 包数或 `net_rx_action()` 次数
-- 该方法基于 `ip_rcv`，只覆盖 IPv4 入站路径；IPv6、隧道内层地址、XDP 提前转发/丢弃等路径不在这个脚本统计范围内
-- `net_rx_action()` 本身不认识 IP，脚本只是用 `@active[cpu]` 将 IPv4 skb 解析结果关联到当前 CPU 的软中断窗口
+- 该方法基于 `tcp_v4_rcv`，覆盖 IPv4 TCP 入站路径，适合 Redis、HTTP、MySQL 等 TCP 服务压测；IPv6、UDP、隧道内层地址、XDP 提前转发/丢弃等路径不在这个脚本统计范围内
+- `net_rx_action()` 本身不认识 IP，脚本只是用 `@active[cpu]` 将 IPv4 TCP skb 解析结果关联到当前 CPU 的软中断窗口
+- 如果 40 个 Redis 实例是“不同 IP”，该方法可以直接观察各 `dst-ip` 被哪些 CPU 的 `net_rx_action()` 处理过；如果 40 个实例是“同一 IP 的不同端口”，仅按 `dst-ip` 会把它们合并，需要把 TCP `dst-port` 也加入 map key 才能区分实例
+- 不建议再只挂 `ip_rcv`：Linux 6.6 的 IPv4 packet_type 同时注册了 `.func = ip_rcv` 和 `.list_func = ip_list_rcv`，高吞吐/GRO/listified receive 场景可能主要走 `ip_list_rcv()`，导致 `kprobe:ip_rcv` 没有命中、输出为空
+
+**如果方法 6 输出为空，先用下面的诊断脚本确认路径命中情况**：
+
+```bash
+sudo bpftrace -e '
+kprobe:net_rx_action { @rx = count(); }
+kprobe:ip_rcv { @ip_rcv = count(); }
+kprobe:ip_list_rcv { @ip_list_rcv = count(); }
+kprobe:tcp_v4_rcv { @tcp_v4_rcv = count(); }
+
+interval:s:3 {
+  print(@rx);
+  print(@ip_rcv);
+  print(@ip_list_rcv);
+  print(@tcp_v4_rcv);
+  clear(@rx);
+  clear(@ip_rcv);
+  clear(@ip_list_rcv);
+  clear(@tcp_v4_rcv);
+}
+'
+```
+
+- 如果 `@ip_list_rcv` 有值但 `@ip_rcv` 为 0，说明旧的 `ip_rcv` 抓取点不适合当前内核路径，应使用 `tcp_v4_rcv` 版本
+- 如果 `@tcp_v4_rcv` 也为 0，优先检查压测流量是否真的是 IPv4 TCP、是否在被测机入站方向、是否被 XDP/TC/iptables 提前处理，或者 Redis 是否实际走 IPv6/本机回环路径
 
 **快速粗略观察可使用方法 8**，因为：
 - 不依赖内核数据结构（更可靠）
