@@ -330,12 +330,15 @@ END {
 sudo bpftrace -e '
 BEGIN {
   printf("Tracing per net_rx_action budget/time histograms...\n");
-  printf("Will stop after 3 interval prints by default\n\n");
+  printf("Will print every 3 seconds and stop after 3 interval prints by default\n\n");
   @max_rounds = 3;
   @round = 0;
 }
 
 kprobe:net_rx_action {
+  // 统计本采样窗口内 net_rx_action() 被调用的次数
+  @rx_action_count++;
+
   // net_rx_action 在单个 CPU 的软中断上下文中运行，用 cpu 作为本轮窗口 key
   @active[cpu] = 1;
   @start_ns[cpu] = nsecs;
@@ -381,9 +384,10 @@ kretprobe:net_rx_action /@active[cpu]/ {
   delete(@entry_usecs[cpu]);
 }
 
-interval:s:10 {
-  // 每 10 秒输出一次，累计输出 3 次后自动退出
+interval:s:3 {
+  // 每 3 秒输出一次，累计输出 3 次后自动退出
   printf("\n=== net_rx_action budget/time histograms ===\n");
+  print(@rx_action_count);
   print(@budget_used_hist);
   print(@elapsed_us_hist);
   print(@time_used_pct_hist);
@@ -391,6 +395,7 @@ interval:s:10 {
   print(@budget_exhausted);
   print(@time_exhausted);
 
+  clear(@rx_action_count);
   clear(@budget_used_hist);
   clear(@elapsed_us_hist);
   clear(@time_used_pct_hist);
@@ -405,6 +410,7 @@ interval:s:10 {
 }
 
 END {
+  clear(@rx_action_count);
   clear(@active);
   clear(@start_ns);
   clear(@budget_used);
@@ -491,7 +497,7 @@ interval:s:5 {
 - **方法 1**：在 `net_rx_action` 入口读取 `netdev_budget` 和 `netdev_budget_usecs` 全局变量，确认每次软中断拿到的初始包数和时间配额
 - **方法 2**：测量 `net_rx_action` 的执行时间，间接反映处理负载
 - **方法 3**：用 `kretprobe:napi_poll` 累计返回值来估算本轮软中断处理的 work，总数可能超过 `netdev_budget`
-- **方法 4**：用 `cpu` 限定本轮 `net_rx_action()` 窗口，并通过 `tracepoint:napi:napi_poll` 累计 `args->work`，周期性输出实际 budget 消耗、实际耗时、时间配额占比和 poll 次数直方图
+- **方法 4**：用 `cpu` 限定本轮 `net_rx_action()` 窗口，并通过 `tracepoint:napi:napi_poll` 累计 `args->work`，周期性输出 `net_rx_action()` 调用次数、实际 budget 消耗、实际耗时、时间配额占比和 poll 次数直方图
 - **方法 5**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
 - **方法 6**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
 
@@ -513,6 +519,7 @@ interval:s:5 {
 
 **推荐使用方法 4**，因为：
 - 能用直方图同时观察单轮 `net_rx_action()` 的实际包数消耗和时间消耗分布
+- 同时输出采样窗口内 `net_rx_action()` 调用次数，便于区分“软中断触发很多但 RX work 很少”和“软中断本身就很少触发”
 - 使用 `cpu` 关联软中断执行窗口，比用 `tid` 归集更贴近 per-CPU `softnet_data` 模型
 - `tracepoint:napi:napi_poll` 直接提供 `work` 字段，比从 `kretprobe:napi_poll` 反推更清晰
 
