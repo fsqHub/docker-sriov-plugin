@@ -522,7 +522,74 @@ END {
 }
 '
 
-# 方法 6：追踪 time_squeeze 事件（通过 /proc 对比）
+# 方法 6：按 dst-ip 统计 net_rx_action 处理 CPU 集合
+sudo bpftrace -e '
+BEGIN {
+  printf("Tracing dst-ip handled by net_rx_action CPUs...\n");
+  printf("Will print every 3 seconds and stop after 3 interval prints by default\n\n");
+  @max_rounds = 3;
+  @round = 0;
+}
+
+kprobe:net_rx_action {
+  // net_rx_action 本身不携带 IP 信息，只记录当前 CPU 正在处理一轮 NET_RX softirq
+  @active[cpu] = 1;
+}
+
+kprobe:ip_rcv /@active[cpu]/ {
+  // ip_rcv 只处理 IPv4 入站 skb，arg0 是 struct sk_buff *
+  $skb = (struct sk_buff *)arg0;
+
+  // ip_hdr(skb) 等价于 skb->head + skb->network_header
+  $iph = (struct iphdr *)($skb->head + $skb->network_header);
+
+  // 防御性检查 IPv4 版本，避免异常 skb 或偏移问题污染统计
+  $ver_ihl = *(uint8 *)$iph;
+  if (($ver_ihl >> 4) == 4) {
+    $dst = ntop($iph->daddr);
+
+    /*
+     * 这里统计的是集合关系，不统计次数。
+     * map 的 value 固定写 1，真正有意义的是 key 中出现过的成员。
+     */
+    // 回答：某个 dst-ip 在 3 秒窗口内被哪些 CPU 的 net_rx_action 处理过
+    @dst_ip_handled_by_cpu[$dst, cpu] = 1;
+
+    // 回答：某个 CPU 的 net_rx_action 在 3 秒窗口内涉及过哪些 dst-ip
+    @cpu_handled_dst_ip[cpu, $dst] = 1;
+  }
+}
+
+kretprobe:net_rx_action /@active[cpu]/ {
+  delete(@active[cpu]);
+}
+
+interval:s:3 {
+  printf("\n=== dst-ip handled by net_rx_action CPUs ===\n");
+  print(@dst_ip_handled_by_cpu);
+
+  printf("\n=== CPU handled dst-ip set ===\n");
+  print(@cpu_handled_dst_ip);
+
+  clear(@dst_ip_handled_by_cpu);
+  clear(@cpu_handled_dst_ip);
+
+  @round = @round + 1;
+  if (@round >= @max_rounds) {
+    exit();
+  }
+}
+
+END {
+  clear(@active);
+  clear(@dst_ip_handled_by_cpu);
+  clear(@cpu_handled_dst_ip);
+  clear(@round);
+  clear(@max_rounds);
+}
+'
+
+# 方法 7：追踪 time_squeeze 事件（通过 /proc 对比）
 # 注意：bpftrace 无法直接访问 softnet_data 结构体的 time_squeeze 字段
 # 建议使用 shell 脚本配合 bpftrace：
 bash -c '
@@ -554,7 +621,7 @@ paste /tmp/squeeze_before.txt /tmp/squeeze_after.txt | awk "{
 grep "@rx_calls" /tmp/bpf_trace.txt
 '
 
-# 方法 7：统计每次 net_rx_action 和 napi_poll 次数（快速粗略观测）
+# 方法 8：统计每次 net_rx_action 和 napi_poll 次数（快速粗略观测）
 sudo bpftrace -e '
 BEGIN {
   printf("Monitoring NAPI budget consumption...\n");
@@ -593,8 +660,9 @@ interval:s:5 {
 - **方法 3**：用 `kretprobe:napi_poll` 累计返回值来估算本轮软中断处理的 work，总数可能超过 `netdev_budget`
 - **方法 4**：用 `cpu` 限定本轮 `net_rx_action()` 窗口，并通过 `tracepoint:napi:napi_poll` 累计 `args->work`，周期性输出 `net_rx_action()` 调用次数、实际 budget 消耗、实际耗时、时间配额占比和 poll 次数直方图
 - **方法 5**：按 `napi:napi_poll` 的 `dev_name` 把 `net_rx_action()` 触达过的 PF/VF 设备归因到具体 CPU，观察每个设备在 3 秒窗口内由哪些 CPU 处理、触达过多少轮软中断、累计多少 RX work
-- **方法 6**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
-- **方法 7**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
+- **方法 6**：在 `net_rx_action()` 活跃窗口内从 IPv4 入站路径 `ip_rcv` 抓取 `dst-ip`，只输出 `dst-ip -> CPU` 和 `CPU -> dst-ip` 两类集合关系
+- **方法 7**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
+- **方法 8**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
 
 **关于方法 4 中 `budget_used=0` 的解释**：
 - `budget_used=0` 表示本轮 `net_rx_action()` 窗口里，`napi:napi_poll` tracepoint 暴露的 `args->work` 累加值为 0；它只说明没有发生可计入 RX budget 扣减的 work。
@@ -625,7 +693,14 @@ interval:s:5 {
 - `@napi_poll_by_dev_cpu[dev,cpu]`、`@work_by_dev_cpu[dev,cpu]`、`@budget_by_dev_cpu[dev,cpu]` 用来辅助判断该设备在对应 CPU 上的 poll 次数、RX work 和 poll budget 规模
 - 注意：同一次 `net_rx_action()` 可能触达多个设备，所以按设备维度求和可能大于 `@rx_action_total`，不能把它理解为严格所有权
 
-**快速粗略观察可使用方法 7**，因为：
+**需要观察 dst-ip 与处理 CPU 关系时，使用方法 6**：
+- `@dst_ip_handled_by_cpu[dst,cpu]` 表示某个 IPv4 目的地址在 3 秒窗口内被哪些 CPU 的 `net_rx_action()` 处理过
+- `@cpu_handled_dst_ip[cpu,dst]` 表示某个 CPU 的 `net_rx_action()` 在 3 秒窗口内涉及过哪些 IPv4 目的地址
+- 该方法只表达集合关系，map 的 value 固定为 `1`，不要把它解读为 skb 包数或 `net_rx_action()` 次数
+- 该方法基于 `ip_rcv`，只覆盖 IPv4 入站路径；IPv6、隧道内层地址、XDP 提前转发/丢弃等路径不在这个脚本统计范围内
+- `net_rx_action()` 本身不认识 IP，脚本只是用 `@active[cpu]` 将 IPv4 skb 解析结果关联到当前 CPU 的软中断窗口
+
+**快速粗略观察可使用方法 8**，因为：
 - 不依赖内核数据结构（更可靠）
 - 输出清晰易懂
 - 可以看出 budget 的利用情况（polls_per_rx 越高，说明 budget 利用越充分）
