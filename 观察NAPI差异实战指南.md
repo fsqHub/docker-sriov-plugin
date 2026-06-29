@@ -495,12 +495,19 @@ interval:s:5 {
 - **方法 5**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
 - **方法 6**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
 
+**关于方法 4 中 `budget_used=0` 的解释**：
+- `budget_used=0` 表示本轮 `net_rx_action()` 窗口里，`napi:napi_poll` tracepoint 暴露的 `args->work` 累加值为 0；它只说明没有发生可计入 RX budget 扣减的 work。
+- 这不等价于“没有网络活动”，也不等价于“当前一定在发包”。它可能来自发包方向的 TX completion、RX ring 暂时无包、目标 VF 的 NAPI poll 没落在当前窗口、低流量空轮询、threaded NAPI/busy poll 路径未被当前窗口覆盖，或脚本统计了非目标设备导致 0 值被放大。
+- Docker VF 直通场景下，如果 `budget_used` 大多为 0，应优先确认流量方向和目标 VF 的 RX 计数。只有同时看到目标 VF 的 TX 计数增长、RX work 很少，才可以把“主要在处理发包/TX completion”作为合理解释之一。
+- 因此，方法 4 更适合观察“单轮软中断是否消耗 RX budget”，不适合单独判断“VF 是否有发包活动”。判断发包应结合 `ethtool -S <vf_netdev>` 的 TX/RX 计数或按 `args->dev_name` 过滤目标 VF 的 NAPI tracepoint。
+
 `★ Insight ─────────────────────────────────────`
 - `netdev_budget` 是 `net_rx_action()` 入口读取的总包数配额；脚本读的是入口初始值，不是循环执行后剩余的局部 `budget`。
 - `netdev_budget_usecs` 是同一轮软中断的时间窗口，和包数配额共同决定本轮 NAPI poll 何时让出 CPU。
 - 方法 3 的累计值不是严格上限：`net_rx_action()` 先执行一次 `napi_poll()`，再扣减并判断 `budget <= 0`，所以默认 `netdev_budget=300`、`napi->weight=64` 时，单轮可能出现 `320` 这类正常超限值。
 - 如果方法 3 出现 `1k-2k`，通常不是单轮 `netdev_budget` 真的放大，而是 `tid` 归集、kprobe 丢事件、softirq/ksoftirqd 执行上下文或其他 NAPI poll 路径混入，导致多轮 poll work 被累加到同一个桶。
 - 方法 4 的统计口径更接近源码：`net_rx_action()` 在当前 CPU 运行期间，`napi:napi_poll` tracepoint 暴露的 `work` 就是本轮从全局包数 budget 中扣减的实际处理量；`elapsed_us_hist` 和 `time_used_pct_hist` 可直接观察本轮实际时间消耗及其相对 `netdev_budget_usecs` 的占比。
+- `budget_used=0` 的核心含义是“没有 RX budget 消耗”，不是“没有收发包动作”；发包方向的 TX completion 只是其中一种可能。
 - 如果 `kaddr()` 报符号不可见，优先检查 `/proc/kallsyms` 权限、`kernel.kptr_restrict` 和 bpftrace 是否具备 root 权限。
 `─────────────────────────────────────────────────`
 
