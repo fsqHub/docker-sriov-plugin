@@ -416,7 +416,7 @@ find_irq_for_queue() {
 			# 优先匹配 irq.log 中看到的 mlx5_compN@pci:<BDF>。
 			# 这会跳过 mlx5_async0，避免 queue 0 被误绑到 async IRQ。
 			pci_pat = pci
-			gsub(/\./, "\\.", pci_pat)
+			gsub(/\./, "[.]", pci_pat)
 			mlx5_comp_pci = "mlx5_comp" q "@pci:" pci_pat "([^0-9A-Za-z_.:-]|$)"
 
 			# 常见 netdev 名称包括 <dev>-<n>、<dev>-rx-<n>、
