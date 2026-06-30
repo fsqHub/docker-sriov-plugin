@@ -388,13 +388,16 @@ irq_from_manual_map() {
 }
 
 dev_pci_address() {
-	local device_path
+	local device_path pci
 
 	device_path=$(readlink -f "/sys/class/net/$DEV/device" 2>/dev/null || true)
 	# 如果未能成功获得设备路径，则当前函数以状态码 1 返回，表示失败。
 	[ -n "$device_path" ] || return 1
 	# 提取路径中的最后一级名称并输出
-	basename -- "$device_path"
+	pci=$(basename -- "$device_path")
+	# 只接受标准 PCI BDF，避免 lo/虚拟设备把 "device" 当成 PCI 名称。
+	[[ "$pci" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$ ]] || return 1
+	printf '%s\n' "$pci"
 }
 
 find_irq_for_queue() {
@@ -564,11 +567,14 @@ configure_xps() {
 }
 
 print_verification_hint() {
+	local pci
+
+	pci=$(dev_pci_address || true)
 	cat <<EOF
 
 Verification hints:
   ethtool -n $DEV
-  grep -i $DEV /proc/interrupts
+  grep -i ${pci:-$DEV} /proc/interrupts
   cat /sys/class/net/$DEV/queues/rx-*/rps_cpus
   cat /sys/class/net/$DEV/queues/rx-*/rps_flow_cnt
   sysctl net.core.rps_sock_flow_entries

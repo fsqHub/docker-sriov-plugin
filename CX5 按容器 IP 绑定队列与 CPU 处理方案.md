@@ -108,7 +108,8 @@ ethtool -n <pf>
 先找 IRQ：
 
 ```bash
-grep -i <pf> /proc/interrupts
+pci=$(basename "$(readlink -f /sys/class/net/<pf>/device)")
+grep -i "$pci" /proc/interrupts
 ```
 
 ### 3.1 CX5 queue 与 `/proc/interrupts` IRQ 的关系
@@ -156,7 +157,8 @@ RX queue 5
 更稳妥的做法是显式确认并传入 `--irq-map QUEUE:IRQ`：
 
 ```bash
-grep -iE '<pf>|<pci>|mlx5' /proc/interrupts
+pci=$(basename "$(readlink -f /sys/class/net/<pf>/device)")
+grep -i "$pci" /proc/interrupts
 ethtool -S <pf> | egrep 'rx.*5|ch.*5|queue.*5'
 
 ./bind-ip-queue-cpu.sh --dev <pf> \
@@ -183,7 +185,8 @@ echo 18 > /proc/irq/<irq_of_rx_queue_5>/smp_affinity_list
 验证中断是否集中到目标 CPU：
 
 ```bash
-watch -n 1 'grep -i <pf> /proc/interrupts'
+pci=$(basename "$(readlink -f /sys/class/net/<pf>/device)")
+watch -n 1 "grep -i $pci /proc/interrupts"
 ```
 
 ## 4. TX：按容器 src-ip 指定 TX queue，并用 XPS 绑定 CPU
@@ -367,7 +370,8 @@ ethtool -S <pf> | egrep 'rx.*5|ch.*5|queue.*5'
 ### 7.2 验证 IRQ CPU
 
 ```bash
-watch -n 1 'grep -i <pf> /proc/interrupts'
+pci=$(basename "$(readlink -f /sys/class/net/<pf>/device)")
+watch -n 1 "grep -i $pci /proc/interrupts"
 ```
 
 目标 queue 的 IRQ 应主要增长在指定 CPU。

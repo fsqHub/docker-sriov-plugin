@@ -285,10 +285,11 @@ class Binder:
         return find_irq_for_queue_in_lines(lines, queue, self.dev, read_dev_pci_address(self.dev))
 
     def print_verification_hint(self) -> None:
+        interrupts_cmd = interrupts_grep_command(self.dev, read_dev_pci_address(self.dev))
         print(f"""
 Verification hints:
   ethtool -n {self.dev}
-  grep -i {self.dev} /proc/interrupts
+  {interrupts_cmd}
   cat /sys/class/net/{self.dev}/queues/rx-*/rps_cpus
   cat /sys/class/net/{self.dev}/queues/rx-*/rps_flow_cnt
   sysctl net.core.rps_sock_flow_entries
@@ -342,7 +343,15 @@ def read_dev_pci_address(dev: str) -> str | None:
     device = Path(f"/sys/class/net/{dev}/device")
     if not device.exists():
         return None
-    return device.resolve().name
+    pci = device.resolve().name
+    if not re.fullmatch(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]", pci):
+        return None
+    return pci
+
+
+def interrupts_grep_command(dev: str, pci: str | None) -> str:
+    target = pci or dev
+    return f"grep -i {target} /proc/interrupts"
 
 
 def parse_interrupt_irq(line: str) -> str | None:
