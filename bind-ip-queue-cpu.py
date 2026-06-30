@@ -59,7 +59,10 @@ class Binder:
 
         # dry-run 用于在开发机审查命令，不强制要求目标机才有的工具。
         if not self.args.dry_run:
-            tools.extend(["ethtool", "tc", "sysctl"])
+            tools.append("ethtool")
+            tools.append("tc")
+            if not self.args.delete_rules:
+                tools.append("sysctl")
 
         for tool in tools:
             if shutil.which(tool) is None:
@@ -84,7 +87,11 @@ class Binder:
     def apply(self, rules: list[Rule]) -> None:
         self.disable_rps_rfs()
         self.enable_ntuple()
+        if self.do_rx:
+            self.delete_rx_ntuple_rules()
         self.ensure_clsact()
+        if self.do_tx:
+            self.delete_tx_egress_filters()
 
         for index, rule in enumerate(rules):
             loc = self.args.location_base + index
@@ -99,6 +106,59 @@ class Binder:
                 self.configure_xps(rule.queue, rule.cpu)
 
         self.print_verification_hint()
+
+    def delete_rules(self) -> None:
+        # 单独清理模式：删除 RX ntuple 和 TX egress filter，但不修改
+        # RPS/RFS、IRQ affinity 或 XPS。
+        self.delete_rx_ntuple_rules()
+        self.delete_tx_egress_filters()
+
+    def delete_rx_ntuple_rules(self) -> None:
+        # 动态读取当前设备上的所有 ntuple Filter location 并删除。
+        # 这样即使 loc 不是 location-base + index，或者规则由上次运行、
+        # 手工命令、驱动重排产生，也能在新增规则前清理干净。
+        print(f"== Deleting all existing RX ntuple rules on {self.dev} ==")
+        locations = self.get_ntuple_rule_locations()
+        if not locations:
+            print(f"== No RX ntuple rules found on {self.dev} ==")
+            return
+
+        for loc in locations:
+            print(f"== Deleting RX ntuple rule loc {loc} on {self.dev} ==")
+            self.run_cmd(["ethtool", "-N", self.dev, "delete", str(loc)])
+
+    def delete_tx_egress_filters(self) -> None:
+        # 动态读取当前 egress filter 的 pref 并删除，避免 pref-base 改变后
+        # 旧 TX queue_mapping 规则残留。
+        print(f"== Deleting all existing TX egress filters on {self.dev} ==")
+        prefs = self.get_tx_egress_filter_prefs()
+        if not prefs:
+            print(f"== No TX egress filters found on {self.dev} ==")
+            return
+
+        for pref in prefs:
+            print(f"== Deleting TX egress filter pref {pref} on {self.dev} ==")
+            self.run_cmd(["tc", "filter", "del", "dev", self.dev, "egress", "pref", str(pref)])
+
+    def get_ntuple_rule_locations(self) -> list[str]:
+        cmd = ["ethtool", "-n", self.dev]
+        print("+ " + shlex.join(cmd))
+        if self.args.dry_run:
+            return []
+
+        result = subprocess.run(cmd, check=True, text=True, capture_output=True)
+        return parse_ntuple_rule_locations(result.stdout)
+
+    def get_tx_egress_filter_prefs(self) -> list[str]:
+        cmd = ["tc", "filter", "show", "dev", self.dev, "egress"]
+        print("+ " + shlex.join(cmd))
+        if self.args.dry_run:
+            return []
+
+        result = subprocess.run(cmd, check=False, text=True, capture_output=True)
+        if result.returncode != 0:
+            return []
+        return parse_tc_egress_filter_prefs(result.stdout)
 
     def disable_rps_rfs(self) -> None:
         if not self.args.disable_rps or not self.do_rx:
@@ -319,6 +379,26 @@ def find_irq_for_queue_in_lines(lines: list[str], queue: int, dev: str, pci: str
     return None
 
 
+def parse_ntuple_rule_locations(output: str) -> list[str]:
+    locations: list[str] = []
+    for line in output.splitlines():
+        match = re.search(r"^\s*Filter:\s+(\S+)\s*$", line)
+        if match:
+            locations.append(match.group(1))
+    return locations
+
+
+def parse_tc_egress_filter_prefs(output: str) -> list[str]:
+    prefs: set[str] = set()
+    for line in output.splitlines():
+        fields = line.split()
+        if "pref" in fields:
+            index = fields.index("pref")
+            if index + 1 < len(fields):
+                prefs.add(fields[index + 1])
+    return sorted(prefs, key=lambda value: (0, int(value)) if value.isdigit() else (1, value))
+
+
 def parse_rule(text: str) -> Rule:
     # 命令行规则格式：IP:QUEUE:CPU[:PORT]。
     parts = text.split(":")
@@ -384,6 +464,7 @@ def build_parser() -> argparse.ArgumentParser:
 Examples:
   ./{script} --dev enp23s0f1np1 --rule 10.0.0.11:5:18:6379 --dry-run
   ./{script} --dev enp23s0f1np1 --config ip-queue-cpu.txt
+  ./{script} --dev enp23s0f1np1 --delete-rules --dry-run
 
 Config file format:
   # IP         QUEUE  CPU  PORT
@@ -395,9 +476,14 @@ Config file format:
     parser.add_argument("--rule", action="append", default=[], help="IP:QUEUE:CPU[:PORT], can be repeated")
     parser.add_argument("--config", help="Read rules from file: IP QUEUE CPU [PORT]")
     parser.add_argument("--irq-map", action="append", default=[], help="QUEUE:IRQ, can be repeated")
-    parser.add_argument("--location-base", type=int, default=1000, help="Base location for ethtool ntuple rules")
-    parser.add_argument("--pref-base", type=int, default=1000, help="Base pref for tc egress filters")
+    parser.add_argument("--location-base", type=int, default=500, help="Base location for ethtool ntuple rules")
+    parser.add_argument("--pref-base", type=int, default=500, help="Base pref for tc egress filters")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing")
+    parser.add_argument(
+        "--delete-rules",
+        action="store_true",
+        help="Only delete RX ntuple rules and TX egress filters",
+    )
     parser.add_argument("--rx-only", action="store_true", help="Configure RX side only")
     parser.add_argument("--tx-only", action="store_true", help="Configure TX side only")
     parser.add_argument("--keep-rps", dest="disable_rps", action="store_false", help="Do not disable RPS/RFS")
@@ -427,6 +513,10 @@ def main() -> None:
     binder.require_interface()
     binder.require_root()
     binder.require_tools()
+    if args.delete_rules:
+        binder.delete_rules()
+        return
+
     binder.validate_rules(rules)
     binder.apply(rules)
 

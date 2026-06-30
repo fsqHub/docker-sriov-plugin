@@ -24,6 +24,7 @@ SCRIPT_NAME=$(basename -- "$0")
 DRY_RUN=0
 DO_RX=1
 DO_TX=1
+DELETE_RULES=0
 
 # RPS/RFS 是软件收包分发层，可能覆盖硬件 ntuple + IRQ affinity
 # 建立的 CPU 局部性。因此只要配置 RX 侧，默认先关闭 RPS/RFS。
@@ -40,8 +41,8 @@ CONFIG_FILE=""
 # 使用确定性的规则 ID，保证重复运行时覆盖同一批规则，而不是不断
 # 追加重复规则。若同一设备上还有其他手工维护的 ethtool/tc 规则，
 # 可通过 --location-base / --pref-base 调整起始编号。
-LOCATION_BASE=1000
-PREF_BASE=1000
+LOCATION_BASE=500
+PREF_BASE=500
 
 RULES=()
 IRQ_MAPS=()
@@ -59,6 +60,7 @@ usage() {
 Usage:
   ./$SCRIPT_NAME --dev <netdev> --rule <ip:queue:cpu[:port]> [OPTIONS]
   ./$SCRIPT_NAME --dev <netdev> --config <file> [OPTIONS]
+  ./$SCRIPT_NAME --dev <netdev> --delete-rules [OPTIONS]
 
 Bind IPv4 TCP traffic for selected IPs to specific RX/TX queues and CPUs on a
 multi-queue netdev. The target device must support the features you enable,
@@ -89,9 +91,10 @@ Options:
                                Blank lines and lines starting with # are ignored
   --irq-map QUEUE:IRQ          Manually map a queue to an IRQ; can be repeated
                                Use this if automatic IRQ discovery is ambiguous
-  --location-base N            Base location for ethtool ntuple rules (default: 1000)
-  --pref-base N                Base pref for tc egress filters (default: 1000)
+  --location-base N            Base location for ethtool ntuple rules (default: 500)
+  --pref-base N                Base pref for tc egress filters (default: 500)
   --dry-run                    Print commands without executing
+  --delete-rules               Only delete RX ntuple rules and TX egress filters
   --rx-only                    Configure RX side only
   --tx-only                    Configure TX side only
   --keep-rps                   Do not disable RPS/RFS
@@ -157,7 +160,11 @@ require_tools() {
 	# dry-run 应该能在未安装 ethtool/tc 的开发机上审查命令；
 	# 只有真实修改系统配置时才强制要求这些工具存在。
 	if [ "$DRY_RUN" -eq 0 ]; then
-		tools+=(ethtool tc sysctl)
+		tools+=(ethtool)
+		tools+=(tc)
+		if [ "$DELETE_RULES" -eq 0 ]; then
+			tools+=(sysctl)
+		fi
 	fi
 
 	for tool in "${tools[@]}"; do
@@ -194,6 +201,9 @@ parse_args() {
 				;;
 			--dry-run)
 				DRY_RUN=1
+				;;
+			--delete-rules)
+				DELETE_RULES=1
 				;;
 			--rx-only)
 				DO_RX=1
@@ -480,6 +490,28 @@ configure_rx_rule() {
 	run_cmd "${cmd[@]}"
 }
 
+delete_rx_ntuple_rules() {
+	# 动态读取当前设备上的所有 ntuple Filter location 并删除。
+	# 这样即使 loc 不是 location-base + index，或者规则由上次运行、
+	# 手工命令、驱动重排产生，也能在新增规则前清理干净。
+	echo "== Deleting all existing RX ntuple rules on $DEV =="
+	run_shell "ethtool -n $(printf '%q' "$DEV") | grep 'Filter:' | awk '{print \$2}' | while read -r loc; do echo \"Deleting rule with location \$loc\"; ethtool -N $(printf '%q' "$DEV") delete \"\$loc\"; done"
+}
+
+delete_tx_egress_filters() {
+	# 动态读取当前 egress filter pref 并删除，避免 pref-base 改变后
+	# 旧 TX queue_mapping 规则残留。
+	echo "== Deleting all existing TX egress filters on $DEV =="
+	run_shell "tc filter show dev $(printf '%q' "$DEV") egress 2>/dev/null | awk '/pref / {print \$5}' | sort -u | while read -r pref; do echo \"Deleting egress filter with pref \$pref\"; tc filter del dev $(printf '%q' "$DEV") egress pref \"\$pref\"; done"
+}
+
+delete_rules() {
+	# 单独清理模式：删除 RX ntuple 和 TX egress filter，但不修改
+	# RPS/RFS、IRQ affinity 或 XPS。
+	delete_rx_ntuple_rules
+	delete_tx_egress_filters
+}
+
 ensure_clsact() {
 	[ "$DO_TX" -eq 1 ] || return 0
 
@@ -554,6 +586,11 @@ main() {
 	require_root
 	require_tools
 
+	if [ "$DELETE_RULES" -eq 1 ]; then
+		delete_rules
+		return 0
+	fi
+
 	[ "${#RULES[@]}" -gt 0 ] || die "no rules specified; use --rule or --config"
 
 	local normalized=()
@@ -571,7 +608,13 @@ main() {
 
 	disable_rps_rfs
 	enable_ntuple
+	if [ "$DO_RX" -eq 1 ]; then
+		delete_rx_ntuple_rules
+	fi
 	ensure_clsact
+	if [ "$DO_TX" -eq 1 ]; then
+		delete_tx_egress_filters
+	fi
 
 	local index=0
 	local loc pref
