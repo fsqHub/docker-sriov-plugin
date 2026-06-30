@@ -221,14 +221,8 @@ class Binder:
         if not path.exists():
             return None
 
-        q = str(queue)
-        pat1 = re.compile(rf"{re.escape(self.dev)}.*(^|[^0-9]){re.escape(q)}([^0-9]|$)")
-        pat2 = re.compile(rf"mlx5.*(^|[^0-9]){re.escape(q)}([^0-9]|$)")
-
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if (self.dev in line and pat1.search(line)) or pat2.search(line):
-                return line.split(":", 1)[0].strip()
-        return None
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return find_irq_for_queue_in_lines(lines, queue, self.dev, read_dev_pci_address(self.dev))
 
     def print_verification_hint(self) -> None:
         print(f"""
@@ -282,6 +276,47 @@ def cpu_to_mask(cpu: int) -> str:
     while len(parts) > 1 and parts[0] == "00000000":
         parts.pop(0)
     return (",".join(parts).lstrip("0") or "0")
+
+
+def read_dev_pci_address(dev: str) -> str | None:
+    device = Path(f"/sys/class/net/{dev}/device")
+    if not device.exists():
+        return None
+    return device.resolve().name
+
+
+def parse_interrupt_irq(line: str) -> str | None:
+    match = re.match(r"\s*(\d+)\s*:", line)
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def find_irq_for_queue_in_lines(lines: list[str], queue: int, dev: str, pci: str | None) -> str | None:
+    q = str(queue)
+
+    # CX5/mlx5e 的真实 IRQ 名称常见为 mlx5_compN@pci:<BDF>。
+    # 先用 compN + PCI 精确匹配，避免 queue 0 误命中 mlx5_async0。
+    if pci:
+        mlx5_comp_pci = re.compile(rf"\bmlx5_comp{re.escape(q)}@pci:{re.escape(pci)}\b")
+        for line in lines:
+            if mlx5_comp_pci.search(line):
+                return parse_interrupt_irq(line)
+
+    dev_queue = re.compile(rf"{re.escape(dev)}.*(^|[^0-9]){re.escape(q)}([^0-9]|$)")
+    for line in lines:
+        if dev in line and dev_queue.search(line):
+            return parse_interrupt_irq(line)
+
+    # 没有 PCI 信息时才退化到 mlx5_compN 的精确名称；这仍比旧的
+    # mlx5.*N 安全，因为不会把 mlx5_async0 当成 queue 0。
+    if not pci:
+        mlx5_comp = re.compile(rf"\bmlx5_comp{re.escape(q)}@pci:")
+        for line in lines:
+            if mlx5_comp.search(line):
+                return parse_interrupt_irq(line)
+
+    return None
 
 
 def parse_rule(text: str) -> Rule:

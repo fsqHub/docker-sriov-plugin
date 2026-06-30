@@ -377,8 +377,17 @@ irq_from_manual_map() {
 	return 1
 }
 
+dev_pci_address() {
+	local device_path
+
+	device_path=$(readlink -f "/sys/class/net/$DEV/device" 2>/dev/null || true)
+	[ -n "$device_path" ] || return 1
+	basename -- "$device_path"
+}
+
 find_irq_for_queue() {
 	local queue="$1"
+	local pci
 
 	if irq_from_manual_map "$queue"; then
 		return 0
@@ -394,21 +403,35 @@ find_irq_for_queue() {
 	# 包含 async/PTP/其他 completion vector。CX5/mlx5e 常见情况下 RX queue
 	# 会落到对应 channel/completion vector，但不能假设第 N 个 IRQ 就是
 	# queue N；需要结合 IRQ 名称、目标 queue 统计增长，或直接用 --irq-map。
-	awk -v dev="$DEV" -v q="$queue" '
-		BEGIN {
-			# 常见 mlx5 名称包括 <dev>-<n>、<dev>-rx-<n>、
-			# <dev>-TxRx-<n>、mlx5_comp<n>@pci:<dev> 等。
-			pat1 = dev ".*(^|[^0-9])" q "([^0-9]|$)"
-			pat2 = "mlx5.*(^|[^0-9])" q "([^0-9]|$)"
+	pci=$(dev_pci_address || true)
+	awk -v dev="$DEV" -v q="$queue" -v pci="$pci" '
+		function irq_no(line, parts) {
+			split(line, parts, ":")
+			gsub(/^[ \t]+|[ \t]+$/, "", parts[1])
+			return parts[1]
 		}
-		$0 ~ dev && $0 ~ pat1 {
-			sub(":", "", $1)
-			print $1
+		BEGIN {
+			# 优先匹配 irq.log 中看到的 mlx5_compN@pci:<BDF>。
+			# 这会跳过 mlx5_async0，避免 queue 0 被误绑到 async IRQ。
+			pci_pat = pci
+			gsub(/\./, "\\.", pci_pat)
+			mlx5_comp_pci = "mlx5_comp" q "@pci:" pci_pat "([^0-9A-Za-z_.:-]|$)"
+
+			# 常见 netdev 名称包括 <dev>-<n>、<dev>-rx-<n>、
+			# <dev>-TxRx-<n> 等。
+			dev_queue = dev ".*(^|[^0-9])" q "([^0-9]|$)"
+			mlx5_comp_any = "mlx5_comp" q "@pci:"
+		}
+		pci != "" && $0 ~ mlx5_comp_pci {
+			print irq_no($0)
 			exit
 		}
-		$0 ~ pat2 {
-			sub(":", "", $1)
-			print $1
+		$0 ~ dev && $0 ~ dev_queue {
+			print irq_no($0)
+			exit
+		}
+		pci == "" && $0 ~ mlx5_comp_any {
+			print irq_no($0)
 			exit
 		}
 	' /proc/interrupts
