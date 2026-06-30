@@ -381,7 +381,9 @@ dev_pci_address() {
 	local device_path
 
 	device_path=$(readlink -f "/sys/class/net/$DEV/device" 2>/dev/null || true)
+	# 如果未能成功获得设备路径，则当前函数以状态码 1 返回，表示失败。
 	[ -n "$device_path" ] || return 1
+	# 提取路径中的最后一级名称并输出
 	basename -- "$device_path"
 }
 
@@ -403,7 +405,7 @@ find_irq_for_queue() {
 	# 包含 async/PTP/其他 completion vector。CX5/mlx5e 常见情况下 RX queue
 	# 会落到对应 channel/completion vector，但不能假设第 N 个 IRQ 就是
 	# queue N；需要结合 IRQ 名称、目标 queue 统计增长，或直接用 --irq-map。
-	pci=$(dev_pci_address || true)
+	pci=$(dev_pci_address || false)
 	awk -v dev="$DEV" -v q="$queue" -v pci="$pci" '
 		function irq_no(line, parts) {
 			split(line, parts, ":")
