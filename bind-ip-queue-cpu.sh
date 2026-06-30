@@ -405,7 +405,7 @@ find_irq_for_queue() {
 	# 包含 async/PTP/其他 completion vector。CX5/mlx5e 常见情况下 RX queue
 	# 会落到对应 channel/completion vector，但不能假设第 N 个 IRQ 就是
 	# queue N；需要结合 IRQ 名称、目标 queue 统计增长，或直接用 --irq-map。
-	pci=$(dev_pci_address || false)
+	pci=$(dev_pci_address || true)
 	awk -v dev="$DEV" -v q="$queue" -v pci="$pci" '
 		function irq_no(line, parts) {
 			split(line, parts, ":")
