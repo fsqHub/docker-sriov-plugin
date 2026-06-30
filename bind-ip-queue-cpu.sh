@@ -60,6 +60,14 @@ For each rule, the script can:
   5. Add/replace a tc egress rule: src-ip[:src-port] -> TX queue.
   6. Set XPS for the TX queue to the requested CPU.
 
+Dependencies:
+  Runtime: bash 4+, python3, awk, grep, sed
+  Apply mode: root, ethtool, tc, sysctl(procps)
+  Kernel/device: multi-queue netdev, ethtool ntuple support for RX steering,
+                 tc flower/skbedit/clsact support for TX queue mapping,
+                 writable /sys queue and /proc/irq affinity files
+  Dry-run: does not require root, ethtool, tc, or sysctl
+
 Options:
   --dev DEV                    Target netdev, e.g. enp23s0f1np1
   --rule IP:QUEUE:CPU[:PORT]   Add one mapping rule; can be repeated
@@ -136,7 +144,7 @@ require_tools() {
 	# dry-run 应该能在未安装 ethtool/tc 的开发机上审查命令；
 	# 只有真实修改系统配置时才强制要求这些工具存在。
 	if [ "$DRY_RUN" -eq 0 ]; then
-		tools+=(ethtool tc)
+		tools+=(ethtool tc sysctl)
 	fi
 
 	for tool in "${tools[@]}"; do

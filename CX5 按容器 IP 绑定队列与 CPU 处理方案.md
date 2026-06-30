@@ -55,7 +55,10 @@ RPS/RFS 仍可能在软件层把 skb 转发到其他 CPU backlog
 
 ```bash
 ./bind-ip-queue-cpu.sh --dev <pf> --rule 10.0.0.11:5:18:6379 --dry-run
+./bind-ip-queue-cpu.py --dev <pf> --rule 10.0.0.11:5:18:6379 --dry-run
 ```
+
+两者功能一致：shell 版适合直接在测试机上快速执行；Python 版参数解析和错误处理更清晰，适合后续扩展批量配置逻辑。
 
 批量配置文件格式：
 
