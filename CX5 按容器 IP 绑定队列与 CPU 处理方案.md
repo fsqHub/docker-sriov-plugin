@@ -111,6 +111,69 @@ ethtool -n <pf>
 grep -i <pf> /proc/interrupts
 ```
 
+### 3.1 CX5 queue 与 `/proc/interrupts` IRQ 的关系
+
+这里容易犯的错误是把 `queue` 编号和 `/proc/interrupts` 中过滤出来的 IRQ 列表位置直接对应。例如：
+
+```bash
+NIC_PCI=0000:17:00.0
+cat /proc/interrupts | grep "$NIC_PCI" | awk -F ':' '{print $1}'
+```
+
+这个命令得到的是“当前属于该 PCI function 的 IRQ/vector 编号集合”，不是“RX queue 到 IRQ 的映射表”。它只能作为候选 IRQ 列表使用，不能假设输出的第 `N` 行就是 queue `N` 的 IRQ。
+
+对 CX5/mlx5e 来说，关系通常是：
+
+```text
+ethtool ntuple action <queue>
+  -> 选择目标 RX ring / RX queue
+  -> RX queue 属于某个 mlx5e channel
+  -> channel 关联 completion queue / completion vector
+  -> completion vector 对应一个 MSI-X IRQ
+  -> IRQ affinity 决定中断优先在哪个 CPU 上触发
+  -> 驱动在该 CPU 上调度 NAPI，进入 net_rx_action()
+```
+
+所以实际链路更接近：
+
+```text
+RX queue 5
+  -> channel 5 或驱动内部映射到的 channel
+  -> mlx5 completion vector
+  -> /proc/interrupts 中某个 IRQ 行
+```
+
+常见环境里，`queue 5`、`channel 5`、`mlx5_comp5` 这类编号可能看起来一致，但这不是内核 ABI，也不是脚本可以无条件依赖的规则。以下情况都可能打破“按顺序对应”的假设：
+
+- `/proc/interrupts` 中同一个 PCI function 可能包含 async event、PTP、control、completion 等不同用途的 IRQ。
+- 驱动命名格式会随内核、驱动版本和设备配置变化，例如 `<pf>-5`、`<pf>-rx-5`、`<pf>-TxRx-5`、`mlx5_comp5@pci:<pci>`。
+- `ethtool -L` 调整 channel 数、网卡 down/up、driver reset、firmware reload 后，queue、channel、IRQ/vector 可能被重建。
+- VF、PF、多端口、多队列和 `combined` channel 配置会影响实际 queue 到 vector 的组织方式。
+- `irqbalance` 可能在你手工写入 `smp_affinity_list` 后再次改写 IRQ affinity。
+
+因此，脚本中的自动 IRQ 发现只做启发式匹配：优先找 IRQ 名称里同时包含设备名和 queue 编号的行，或者常见 `mlx5` completion vector 命名。它适合快速实验，但不应该作为严格生产映射依据。
+
+更稳妥的做法是显式确认并传入 `--irq-map QUEUE:IRQ`：
+
+```bash
+grep -iE '<pf>|<pci>|mlx5' /proc/interrupts
+ethtool -S <pf> | egrep 'rx.*5|ch.*5|queue.*5'
+
+./bind-ip-queue-cpu.sh --dev <pf> \
+  --rule 10.0.0.11:5:18:6379 \
+  --irq-map 5:<irq_of_rx_queue_5>
+```
+
+确认 queue 与 IRQ 对应关系时，建议用“目标流量 + 计数增长”验证，而不是只看名称：
+
+1. 先下发 `dst-ip -> queue 5` 的 ntuple 规则。
+2. 对目标 Redis IP 发起压测。
+3. 观察 `ethtool -S <pf>` 中 queue `5` 相关 `rx_packets/rx_bytes` 是否增长。
+4. 同时观察 `/proc/interrupts` 中候选 IRQ 哪一行的计数随该流量增长。
+5. 将确认后的 IRQ 用 `--irq-map 5:<irq>` 固定传给脚本。
+
+这样得到的是“实测 queue 5 当前对应哪个 IRQ”，而不是依赖 `/proc/interrupts` 输出顺序。
+
 再绑定：
 
 ```bash

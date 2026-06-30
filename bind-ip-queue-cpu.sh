@@ -387,6 +387,13 @@ find_irq_for_queue() {
 	# IRQ 名称是驱动相关的。这里的启发式匹配覆盖常见 mlx5 命名和
 	# 按 queue 编号命名的通用形式；生产环境中如果命名规则明确，
 	# 优先使用 --irq-map 显式指定。
+	#
+	# 注意：queue 编号和下面命令取出的 IRQ 列表不是稳定的按序映射：
+	#   cat /proc/interrupts | grep "$NIC_PCI" | awk -F ':' '{print $1}'
+	# 该命令只表示“这个 PCI function 当前有哪些 IRQ/vector”，其中可能
+	# 包含 async/PTP/其他 completion vector。CX5/mlx5e 常见情况下 RX queue
+	# 会落到对应 channel/completion vector，但不能假设第 N 个 IRQ 就是
+	# queue N；需要结合 IRQ 名称、目标 queue 统计增长，或直接用 --irq-map。
 	awk -v dev="$DEV" -v q="$queue" '
 		BEGIN {
 			# 常见 mlx5 名称包括 <dev>-<n>、<dev>-rx-<n>、
