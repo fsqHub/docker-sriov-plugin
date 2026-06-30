@@ -21,6 +21,19 @@ class Rule:
 
 
 class Binder:
+    # 本脚本写入的是网卡、驱动和内核的运行态状态，不能把它们当成
+    # down/up 后一定保留的持久配置：
+    # - ethtool ntuple/flow director 规则可能在 netdev close/open、reset、
+    #   firmware reload 或 channel 重建后被驱动清空或重新组织。
+    # - IRQ affinity 绑定当前 IRQ/vector 编号；down/up 或 queue 重建后 IRQ
+    #   可能重新分配，irqbalance 也可能再次覆盖 affinity。
+    # - RPS/RFS/XPS 写入 sysfs/procfs，queue 重建、网络管理组件或 sysctl
+    #   配置重放都可能改写这些值。
+    # - tc clsact/filter 在普通 carrier down/up 后不一定消失，但接口被
+    #   网络管理器重建、qdisc 被替换或驱动 reset 后仍需复查。
+    #
+    # 因此生产环境应在接口 up、驱动 reload、channel 调整、容器 IP 变更
+    # 之后重新执行脚本，并按 print_verification_hint() 给出的命令校验。
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.dev = args.dev

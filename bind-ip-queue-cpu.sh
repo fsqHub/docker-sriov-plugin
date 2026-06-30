@@ -8,6 +8,19 @@ SCRIPT_NAME=$(basename -- "$0")
 
 # 默认配置完整的 CPU 局部性闭环：
 # RX：dst-ip -> RX queue -> IRQ CPU；TX：src-ip -> TX queue -> XPS CPU。
+#
+# 这些配置主要是运行态状态，不应视为网卡 down/up 后仍然稳定存在：
+# - RX ntuple/flow director 规则由驱动和硬件规则表维护，部分驱动会在
+#   netdev close/open、reset、firmware reload 或 channel 重建后清空或重排。
+# - IRQ affinity 依赖当前 IRQ/vector 编号，down/up 或重建 queue 后 IRQ 可能
+#   重新分配；irqbalance 也可能在脚本运行后再次覆盖 affinity。
+# - RPS/RFS/XPS 写入 sysfs/procfs，通常不是持久配置；queue 重建、系统
+#   网络管理组件或 sysctl 配置重放都可能改变这些值。
+# - tc clsact/filter 属于内核 qdisc/filter 状态，普通 carrier down/up 不一定
+#   删除，但接口被网络管理器重建、qdisc 被替换或驱动 reset 后仍需复查。
+#
+# 因此生产环境建议把本脚本挂到接口 up、驱动 reload、channel 调整、容器
+# IP 变更之后执行，并用脚本末尾的 verification hints 校验实际状态。
 DRY_RUN=0
 DO_RX=1
 DO_TX=1
