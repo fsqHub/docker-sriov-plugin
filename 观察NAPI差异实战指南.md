@@ -592,6 +592,76 @@ END {
 }
 '
 
+# 方法 6B：按本机发出的 IPv4 TCP dst-ip 统计发送 CPU 集合
+sudo bpftrace -e '
+BEGIN {
+  printf("Tracing local IPv4 TCP tx dst-ip by sending CPUs...\n");
+  printf("Will print every 3 seconds and stop after 3 interval prints by default\n\n");
+  @max_rounds = 3;
+  @round = 0;
+}
+
+kprobe:ip_local_out {
+  /*
+   * ip_local_out() 覆盖本机协议栈发出的 IPv4 包，包括容器 netns
+   * 内进程经本机内核发出的 TCP skb。arg2 是 struct sk_buff *。
+   */
+  $skb = (struct sk_buff *)arg2;
+
+  // 在 ip_local_out() 处 IPv4 header 已经构造完成，可直接读取 network_header
+  $iph = (struct iphdr *)($skb->head + $skb->network_header);
+
+  // 只统计 IPv4 TCP 发包方向；protocol 6 即 TCP
+  $ver_ihl = *(uint8 *)$iph;
+  if (($ver_ihl >> 4) == 4 && $iph->protocol == 6) {
+    $dst = ntop($iph->daddr);
+
+    /*
+     * 集合关系用于回答 dst-ip 由哪些 CPU 发出；计数用于粗略观察热度。
+     * 它统计的是 skb 次数，不是网卡实际发出的线速包数；
+     * GSO/TSO 可能让一个 skb 在网卡侧拆成多个报文。
+     */
+    @tx_dst_ip_sent_by_cpu[$dst, cpu] = 1;
+    @cpu_sent_tx_dst_ip[cpu, $dst] = 1;
+    @tx_dst_ip_skb_count[$dst] = count();
+    @tx_dst_ip_cpu_skb_count[$dst, cpu] = count();
+  }
+}
+
+interval:s:3 {
+  printf("\n=== tx dst-ip sent by CPU set ===\n");
+  print(@tx_dst_ip_sent_by_cpu);
+
+  printf("\n=== CPU sent tx dst-ip set ===\n");
+  print(@cpu_sent_tx_dst_ip);
+
+  printf("\n=== tx dst-ip skb count ===\n");
+  print(@tx_dst_ip_skb_count);
+
+  printf("\n=== tx dst-ip skb count by CPU ===\n");
+  print(@tx_dst_ip_cpu_skb_count);
+
+  clear(@tx_dst_ip_sent_by_cpu);
+  clear(@cpu_sent_tx_dst_ip);
+  clear(@tx_dst_ip_skb_count);
+  clear(@tx_dst_ip_cpu_skb_count);
+
+  @round = @round + 1;
+  if (@round >= @max_rounds) {
+    exit();
+  }
+}
+
+END {
+  clear(@tx_dst_ip_sent_by_cpu);
+  clear(@cpu_sent_tx_dst_ip);
+  clear(@tx_dst_ip_skb_count);
+  clear(@tx_dst_ip_cpu_skb_count);
+  clear(@round);
+  clear(@max_rounds);
+}
+'
+
 # 方法 7：追踪 time_squeeze 事件（通过 /proc 对比）
 # 注意：bpftrace 无法直接访问 softnet_data 结构体的 time_squeeze 字段
 # 建议使用 shell 脚本配合 bpftrace：
@@ -664,6 +734,7 @@ interval:s:5 {
 - **方法 4**：用 `cpu` 限定本轮 `net_rx_action()` 窗口，并通过 `tracepoint:napi:napi_poll` 累计 `args->work`，周期性输出 `net_rx_action()` 调用次数、实际 budget 消耗、实际耗时、时间配额占比和 poll 次数直方图
 - **方法 5**：按 `napi:napi_poll` 的 `dev_name` 把 `net_rx_action()` 触达过的 PF/VF 设备归因到具体 CPU，观察每个设备在 3 秒窗口内由哪些 CPU 处理、触达过多少轮软中断、累计多少 RX work
 - **方法 6**：在 `net_rx_action()` 活跃窗口内从 IPv4 TCP 路径 `tcp_v4_rcv` 抓取 `dst-ip`，只输出 `dst-ip -> CPU` 和 `CPU -> dst-ip` 两类集合关系，推荐用于 Redis 压测
+- **方法 6B**：在本机 IPv4 TCP 发包路径 `ip_local_out` 抓取 `dst-ip`，输出 `tx dst-ip -> CPU`、`CPU -> tx dst-ip` 集合关系，并粗略统计 TX skb 次数
 - **方法 7**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
 - **方法 8**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
 
@@ -704,6 +775,14 @@ interval:s:5 {
 - `net_rx_action()` 本身不认识 IP，脚本只是用 `@active[cpu]` 将 IPv4 TCP skb 解析结果关联到当前 CPU 的软中断窗口
 - 如果 40 个 Redis 实例是“不同 IP”，该方法可以直接观察各 `dst-ip` 被哪些 CPU 的 `net_rx_action()` 处理过；如果 40 个实例是“同一 IP 的不同端口”，仅按 `dst-ip` 会把它们合并，需要把 TCP `dst-port` 也加入 map key 才能区分实例
 - 不建议再只挂 `ip_rcv`：Linux 6.6 的 IPv4 packet_type 同时注册了 `.func = ip_rcv` 和 `.list_func = ip_list_rcv`，高吞吐/GRO/listified receive 场景可能主要走 `ip_list_rcv()`，导致 `kprobe:ip_rcv` 没有命中、输出为空
+
+**需要观察本机发包方向 TCP dst-ip 与发送 CPU 关系时，使用方法 6B**：
+- `@tx_dst_ip_sent_by_cpu[dst,cpu]` 表示某个 IPv4 TCP 目的地址在 3 秒窗口内由哪些 CPU 执行过本机发包路径
+- `@cpu_sent_tx_dst_ip[cpu,dst]` 表示某个 CPU 在 3 秒窗口内向哪些 IPv4 TCP 目的地址发过 skb
+- `@tx_dst_ip_skb_count[dst]` 和 `@tx_dst_ip_cpu_skb_count[dst,cpu]` 是 skb 计数，只能粗略表示发包热度；GSO/TSO、重传、qdisc 和驱动 offload 会让它不同于网卡线速包数
+- 该方法基于 `ip_local_out`，覆盖本机协议栈发出的 IPv4 包，包括容器 netns 内进程经本机内核发出的 TCP 流量；它不覆盖纯转发、桥接转发、XDP/TC 提前重定向或网卡硬件 offload 绕过内核的路径
+- 在 Redis 服务端机器上跑该方法时，发包方向的 `dst-ip` 通常是压测客户端 IP；如果要观察“发往 Redis 实例 IP 的入站请求”，仍应使用方法 6
+- 如果需要按网卡设备或 TX queue 进一步拆分，应再结合 `tracepoint:net:net_dev_start_xmit` 的 `dev`、`queue_mapping` 字段；方法 6B 的重点是 IP 层目的地址与当前发送 CPU
 
 **如果方法 6 输出为空，先用下面的诊断脚本确认路径命中情况**：
 
