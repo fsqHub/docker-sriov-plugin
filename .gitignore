@@ -10,3 +10,6 @@ Dockerfile
 REDIS_ANALYSIS_COMPLETE.md
 容器网络模式对比分析-old.pdf
 irq.log
+test_*
+__pycache__/
+*.pyc
