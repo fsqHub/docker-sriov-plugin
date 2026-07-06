@@ -776,9 +776,9 @@ kprobe:mlx5e_consume_skb {
   /*
    * mlx5e_consume_skb() 位于 mlx5e TX completion 清理路径。
    * 当前 cpu 是处理该 TX completion 的 NAPI/softirq CPU。
-   * arg0 是 struct mlx5e_txqsq *，arg1 是 struct sk_buff *。
+   * 默认脚本不解析 arg0，避免依赖 bpftrace 不一定可见的 mlx5e 私有 TX SQ 类型。
+   * arg1 是 struct sk_buff *，用它解析 TCP dst-ip。
    */
-  $sq = (struct mlx5e_txqsq *)arg0;
   $skb = (struct sk_buff *)arg1;
 
   // ip_hdr(skb) 等价于 skb->head + skb->network_header
@@ -791,14 +791,12 @@ kprobe:mlx5e_consume_skb {
 
     /*
      * 前两个 map 是集合关系，用来回答 dst-ip 与 completion CPU 的双向关系。
-     * 后几个 map 是 skb 计数，用来辅助观察 TX queue/channel 分布。
+     * 后两个 map 是 skb 计数，用来辅助观察 completion 清理热度。
      */
     @tx_completion_dst_ip_handled_by_cpu[$dst, cpu] = 1;
     @cpu_handled_tx_completion_dst_ip[cpu, $dst] = 1;
     @tx_completion_dst_ip_skb_count[$dst] = count();
     @tx_completion_dst_ip_cpu_skb_count[$dst, cpu] = count();
-    @tx_completion_dst_ip_queue_cpu[$dst, $sq->txq_ix, cpu] = count();
-    @tx_completion_dst_ip_channel_cpu[$dst, $sq->ch_ix, cpu] = count();
   }
 }
 
@@ -815,18 +813,10 @@ interval:s:3 {
   printf("\n=== TX completion dst-ip skb count by CPU ===\n");
   print(@tx_completion_dst_ip_cpu_skb_count);
 
-  printf("\n=== TX completion dst-ip by txq,cpu ===\n");
-  print(@tx_completion_dst_ip_queue_cpu);
-
-  printf("\n=== TX completion dst-ip by channel,cpu ===\n");
-  print(@tx_completion_dst_ip_channel_cpu);
-
   clear(@tx_completion_dst_ip_handled_by_cpu);
   clear(@cpu_handled_tx_completion_dst_ip);
   clear(@tx_completion_dst_ip_skb_count);
   clear(@tx_completion_dst_ip_cpu_skb_count);
-  clear(@tx_completion_dst_ip_queue_cpu);
-  clear(@tx_completion_dst_ip_channel_cpu);
 
   @round = @round + 1;
   if (@round >= @max_rounds) {
@@ -839,8 +829,6 @@ END {
   clear(@cpu_handled_tx_completion_dst_ip);
   clear(@tx_completion_dst_ip_skb_count);
   clear(@tx_completion_dst_ip_cpu_skb_count);
-  clear(@tx_completion_dst_ip_queue_cpu);
-  clear(@tx_completion_dst_ip_channel_cpu);
   clear(@round);
   clear(@max_rounds);
 }
@@ -919,7 +907,7 @@ interval:s:5 {
 - **方法 5**：按 `napi:napi_poll` 的 `dev_name` 把 `net_rx_action()` 触达过的 PF/VF 设备归因到具体 CPU，观察每个设备在 3 秒窗口内由哪些 CPU 处理、触达过多少轮软中断、累计多少 RX work
 - **方法 6**：在 `net_rx_action()` 活跃窗口内从 IPv4 TCP 路径 `tcp_v4_rcv` 抓取 `dst-ip`，只输出 `dst-ip -> CPU` 和 `CPU -> dst-ip` 两类集合关系，推荐用于 Redis 压测
 - **方法 6B**：在本机 IPv4 TCP 发包路径 `ip_queue_xmit` 从 socket 元数据抓取 `dst-ip`，输出 `tx dst-ip -> CPU`、`CPU -> tx dst-ip` 集合关系，并粗略统计 TX skb 次数
-- **方法 6C**：在 mlx5e TX completion 清理路径 `mlx5e_consume_skb` 从 skb 抓取 TCP `dst-ip`，输出 `tx completion dst-ip -> CPU` 和 `CPU -> tx completion dst-ip` 集合关系，并按 skb、TX queue、channel 粗略统计处理分布
+- **方法 6C**：在 mlx5e TX completion 清理路径 `mlx5e_consume_skb` 从 skb 抓取 TCP `dst-ip`，输出 `tx completion dst-ip -> CPU` 和 `CPU -> tx completion dst-ip` 集合关系，并按 skb 和 CPU 粗略统计处理分布
 - **方法 7**：追踪 `time_squeeze` 事件，检测 budget 耗尽或超时（需要访问内核结构体，可能受限）
 - **方法 8**：统计 `net_rx_action` 和 `napi_poll` 的调用次数，计算平均每次软中断调用多少次 poll（最简单可靠）
 
@@ -975,7 +963,8 @@ interval:s:5 {
 - `@tx_completion_dst_ip_handled_by_cpu[dst,cpu]` 表示发往某个 IPv4 TCP 目的地址的 skb，其 TX completion 在 3 秒窗口内由哪些 CPU 的 NAPI 清理过
 - `@cpu_handled_tx_completion_dst_ip[cpu,dst]` 表示某个 CPU 在 3 秒窗口内清理过哪些目的地址的 TX completion
 - `@tx_completion_dst_ip_skb_count[dst]` 和 `@tx_completion_dst_ip_cpu_skb_count[dst,cpu]` 是 TX completion 阶段的 skb 计数，不是线速包数
-- `@tx_completion_dst_ip_queue_cpu[dst,txq,cpu]` 和 `@tx_completion_dst_ip_channel_cpu[dst,ch,cpu]` 用于辅助确认同一目的地址的 completion 分布到了哪些 mlx5e TX queue/channel
+- 默认脚本不解析 `arg0`，避免依赖 bpftrace 不一定可见的 mlx5e 私有 TX SQ 类型；如果需要继续拆 TX queue/channel，必须先确认目标机器有可用的驱动 BTF/调试信息，或按目标内核版本手工校验结构偏移，不建议放进通用脚本
+- 如果 bpftrace 报 `unknown struct/union`，通常说明还在运行旧版脚本或本机缺少 mlx5e 私有类型的 BTF 信息；先使用这里不解析 `arg0` 的默认版本
 - 该方法依赖 mlx5e 私有函数 `mlx5e_consume_skb`，适合 CX5/mlx5e；其他网卡驱动需要替换成对应 TX completion 释放 skb 的函数
 - 如果启用 GSO/TSO，一个 skb 可能对应多个网卡实际报文；如果是隧道或封装流量，脚本读到的是外层 IPv4 头
 
