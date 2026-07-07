@@ -46,11 +46,13 @@ LOCATION_BASE=500
 PREF_BASE=500
 RSS_CONTEXT_DRY_BASE=9000
 RSS_CONTEXT_RESULT=""
+RSS_CONTEXT_STATE_FILE=""
 
 RAW_RULES=()
 NORMALIZED_RULES=()
 IRQ_MAPS=()
 RSS_CONTEXT_MAPS=()
+RSS_CONTEXT_CLEANUP_RECORDS=()
 
 declare -A QUEUE_CPUSET_BY_QUEUE=()
 declare -A IRQ_BOUND_BY_QUEUE=()
@@ -131,7 +133,10 @@ Options:
   --rss-context QUEUES:CTX        Reuse an existing RSS context for QUEUES
                                   QUEUES uses the same syntax as --rule
   --delete-rss-contexts           With --delete-rules, delete contexts supplied
-                                  through --rss-context
+                                  through --rss-context and contexts auto-created
+                                  by previous runs recorded in RSS state
+  --rss-context-state FILE        State file for auto-created RSS contexts
+                                  (default: /run/${SCRIPT_NAME%.sh}.DEV.rss-contexts)
   --location-base N               Base location for ethtool ntuple rules (default: 500)
   --pref-base N                   Base pref for tc egress filters (default: 500)
   --rss-context-dry-base N        Synthetic context base in --dry-run (default: 9000)
@@ -250,6 +255,11 @@ parse_args() {
 				;;
 			--delete-rss-contexts)
 				DELETE_RSS_CONTEXTS=1
+				;;
+			--rss-context-state)
+				shift
+				RSS_CONTEXT_STATE_FILE=${1:-}
+				[ -n "$RSS_CONTEXT_STATE_FILE" ] || die "--rss-context-state requires a value"
 				;;
 			--location-base)
 				shift
@@ -472,6 +482,11 @@ require_interface() {
 	[ -d "/sys/class/net/$DEV" ] || die "netdev not found: $DEV"
 }
 
+set_default_rss_context_state_file() {
+	[ -n "$RSS_CONTEXT_STATE_FILE" ] && return 0
+	RSS_CONTEXT_STATE_FILE="/run/${SCRIPT_NAME%.sh}.${DEV}.rss-contexts"
+}
+
 check_queue_exists() {
 	local queue="$1"
 	[ "$SKIP_QUEUE_CHECK" -eq 0 ] || return 0
@@ -562,17 +577,78 @@ normalize_rule() {
 	printf '%s|%s|%s|%s\n' "$ip" "$queues_csv" "$cpusets_joined" "$port"
 }
 
-normalize_rss_context_maps() {
-	local item queue_spec ctx expanded_queues queues_csv
+normalize_queue_spec_to_csv() {
+	local queue_spec="$1"
+	local expanded_queues
 	local queues=()
+
+	expanded_queues=$(expand_number_spec "$queue_spec" "queue") || exit $?
+	mapfile -t queues <<<"$expanded_queues"
+	[ "${#queues[@]}" -gt 0 ] || die "queue spec has no queues: $queue_spec"
+	join_by_comma "${queues[@]}"
+}
+
+remember_rss_context_cleanup_record() {
+	local queue_csv="$1"
+	local ctx="$2"
+
+	RSS_CONTEXT_CLEANUP_RECORDS+=("$queue_csv|$ctx")
+}
+
+prepare_rss_context_state_file() {
+	[ "$DRY_RUN" -eq 0 ] || return 0
+
+	local state_dir
+	state_dir=$(dirname -- "$RSS_CONTEXT_STATE_FILE")
+	mkdir -p "$state_dir"
+	touch "$RSS_CONTEXT_STATE_FILE"
+	[ -w "$RSS_CONTEXT_STATE_FILE" ] || die "RSS context state file is not writable: $RSS_CONTEXT_STATE_FILE"
+}
+
+record_auto_rss_context() {
+	local queue_csv="$1"
+	local ctx="$2"
+
+	[ "$DRY_RUN" -eq 0 ] || return 0
+	prepare_rss_context_state_file
+	printf '%s %s\n' "$queue_csv" "$ctx" >>"$RSS_CONTEXT_STATE_FILE"
+}
+
+load_rss_context_state_records() {
+	[ "$DELETE_RSS_CONTEXTS" -eq 1 ] || return 0
+	[ -f "$RSS_CONTEXT_STATE_FILE" ] || return 0
+
+	local raw line queue_spec ctx queue_csv
+	while IFS= read -r raw || [ -n "$raw" ]; do
+		line=${raw%%#*}
+		# shellcheck disable=SC2086
+		set -- $line
+		[ $# -eq 0 ] && continue
+		[ $# -eq 2 ] || die "invalid RSS context state line, expected: QUEUES CTX; got: $raw"
+		queue_spec=$1
+		ctx=$2
+		validate_number "$ctx" "RSS context"
+		queue_csv=$(normalize_queue_spec_to_csv "$queue_spec")
+		remember_rss_context_cleanup_record "$queue_csv" "$ctx"
+	done <"$RSS_CONTEXT_STATE_FILE"
+}
+
+clear_rss_context_state_file() {
+	[ "$DRY_RUN" -eq 0 ] || return 0
+	[ -f "$RSS_CONTEXT_STATE_FILE" ] || return 0
+
+	rm -f -- "$RSS_CONTEXT_STATE_FILE"
+}
+
+normalize_rss_context_maps() {
+	local item queue_spec ctx queues_csv
 	for item in "${RSS_CONTEXT_MAPS[@]}"; do
 		IFS=: read -r queue_spec ctx <<<"$item"
 		[ -n "${queue_spec:-}" ] && [ -n "${ctx:-}" ] || die "invalid --rss-context, expected QUEUES:CTX: $item"
 		validate_number "$ctx" "RSS context"
-		expanded_queues=$(expand_number_spec "$queue_spec" "queue") || exit $?
-		mapfile -t queues <<<"$expanded_queues"
-		queues_csv=$(join_by_comma "${queues[@]}")
+		queues_csv=$(normalize_queue_spec_to_csv "$queue_spec")
 		RSS_CONTEXT_BY_QUEUES[$queues_csv]="$ctx"
+		remember_rss_context_cleanup_record "$queues_csv" "$ctx"
 	done
 }
 
@@ -772,11 +848,14 @@ ensure_rss_context() {
 	fi
 
 	echo "== Creating RSS context for queues $queue_csv on $DEV =="
+	prepare_rss_context_state_file
 	print_cmd ethtool -X "$DEV" hfunc toeplitz context new
 	output=$(ethtool -X "$DEV" hfunc toeplitz context new)
 	printf '%s\n' "$output"
 	ctx=$(printf '%s\n' "$output" | parse_new_rss_context)
 	[ -n "$ctx" ] || die "failed to parse new RSS context id from ethtool output"
+	record_auto_rss_context "$queue_csv" "$ctx"
+	remember_rss_context_cleanup_record "$queue_csv" "$ctx"
 
 	run_cmd ethtool -X "$DEV" equal "$count" start "$start" context "$ctx"
 	RSS_CONTEXT_BY_QUEUES[$queue_csv]="$ctx"
@@ -839,16 +918,21 @@ delete_tx_egress_filters() {
 delete_configured_rss_contexts() {
 	[ "$DELETE_RSS_CONTEXTS" -eq 1 ] || return 0
 
-	local queue_csv ctx seen_key
+	load_rss_context_state_records
+
+	local record queue_csv ctx seen_key
 	declare -A seen_contexts=()
-	for queue_csv in "${!RSS_CONTEXT_BY_QUEUES[@]}"; do
-		ctx=${RSS_CONTEXT_BY_QUEUES[$queue_csv]}
+	for record in "${RSS_CONTEXT_CLEANUP_RECORDS[@]}"; do
+		IFS='|' read -r queue_csv ctx <<<"$record"
+		[ -n "$ctx" ] || continue
 		seen_key="ctx-$ctx"
 		[ -z "${seen_contexts[$seen_key]:-}" ] || continue
 		echo "== Deleting RSS context $ctx for queues $queue_csv on $DEV =="
 		run_cmd ethtool -X "$DEV" context "$ctx" delete
 		seen_contexts[$seen_key]=1
 	done
+
+	clear_rss_context_state_file
 }
 
 delete_rules() {
@@ -1004,6 +1088,7 @@ main() {
 
 	load_config_rules
 	require_interface
+	set_default_rss_context_state_file
 	require_root
 	require_tools
 	normalize_rss_context_maps
