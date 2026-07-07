@@ -559,6 +559,7 @@ kprobe:tcp_v4_rcv /@active[cpu]/ {
   // 防御性检查 IPv4 版本，避免异常 skb 或偏移问题污染统计
   $ver_ihl = *(uint8 *)$iph;
   if (($ver_ihl >> 4) == 4) {
+    $src = ntop($iph->saddr);
     $dst = ntop($iph->daddr);
 
     /*
@@ -570,6 +571,12 @@ kprobe:tcp_v4_rcv /@active[cpu]/ {
 
     // 回答：某个 CPU 的 net_rx_action 在 3 秒窗口内涉及过哪些 dst-ip
     @cpu_handled_dst_ip[cpu, $dst] = 1;
+
+    // 新增输出：某个 src-ip 在 3 秒窗口内被哪些 CPU 的 net_rx_action 处理过
+    @src_ip_handled_by_cpu[$src, cpu] = 1;
+
+    // 新增输出：某个 CPU 的 net_rx_action 在 3 秒窗口内涉及过哪些 src-ip
+    @cpu_handled_src_ip[cpu, $src] = 1;
   }
 }
 
@@ -584,8 +591,16 @@ interval:s:3 {
   printf("\n=== CPU handled dst-ip set ===\n");
   print(@cpu_handled_dst_ip);
 
+  printf("\n=== src-ip handled by net_rx_action CPUs ===\n");
+  print(@src_ip_handled_by_cpu);
+
+  printf("\n=== CPU handled src-ip set ===\n");
+  print(@cpu_handled_src_ip);
+
   clear(@dst_ip_handled_by_cpu);
   clear(@cpu_handled_dst_ip);
+  clear(@src_ip_handled_by_cpu);
+  clear(@cpu_handled_src_ip);
 
   @round = @round + 1;
   if (@round >= @max_rounds) {
@@ -597,6 +612,8 @@ END {
   clear(@active);
   clear(@dst_ip_handled_by_cpu);
   clear(@cpu_handled_dst_ip);
+  clear(@src_ip_handled_by_cpu);
+  clear(@cpu_handled_src_ip);
   clear(@round);
   clear(@max_rounds);
 }
@@ -787,6 +804,7 @@ kprobe:mlx5e_consume_skb {
   // 只统计 IPv4 TCP，避免把异常 skb、IPv6 或非 TCP 流量混入 dst-ip 维度
   $ver_ihl = *(uint8 *)$iph;
   if (($ver_ihl >> 4) == 4 && $iph->protocol == 6) {
+    $src = ntop($iph->saddr);
     $dst = ntop($iph->daddr);
 
     /*
@@ -797,6 +815,13 @@ kprobe:mlx5e_consume_skb {
     @cpu_handled_tx_completion_dst_ip[cpu, $dst] = 1;
     @tx_completion_dst_ip_skb_count[$dst] = count();
     @tx_completion_dst_ip_cpu_skb_count[$dst, cpu] = count();
+
+    /*
+     * 新增输出只补 src-ip 与 completion CPU 的集合关系，不改变原有
+     * dst-ip 输出格式。
+     */
+    @tx_completion_src_ip_handled_by_cpu[$src, cpu] = 1;
+    @cpu_handled_tx_completion_src_ip[cpu, $src] = 1;
   }
 }
 
@@ -813,10 +838,18 @@ interval:s:3 {
   printf("\n=== TX completion dst-ip skb count by CPU ===\n");
   print(@tx_completion_dst_ip_cpu_skb_count);
 
+  printf("\n=== TX completion src-ip handled by NAPI CPUs ===\n");
+  print(@tx_completion_src_ip_handled_by_cpu);
+
+  printf("\n=== CPU handled TX completion src-ip set ===\n");
+  print(@cpu_handled_tx_completion_src_ip);
+
   clear(@tx_completion_dst_ip_handled_by_cpu);
   clear(@cpu_handled_tx_completion_dst_ip);
   clear(@tx_completion_dst_ip_skb_count);
   clear(@tx_completion_dst_ip_cpu_skb_count);
+  clear(@tx_completion_src_ip_handled_by_cpu);
+  clear(@cpu_handled_tx_completion_src_ip);
 
   @round = @round + 1;
   if (@round >= @max_rounds) {
@@ -829,6 +862,8 @@ END {
   clear(@cpu_handled_tx_completion_dst_ip);
   clear(@tx_completion_dst_ip_skb_count);
   clear(@tx_completion_dst_ip_cpu_skb_count);
+  clear(@tx_completion_src_ip_handled_by_cpu);
+  clear(@cpu_handled_tx_completion_src_ip);
   clear(@round);
   clear(@max_rounds);
 }
@@ -943,6 +978,8 @@ interval:s:5 {
 **需要观察 Redis/TCP dst-ip 与处理 CPU 关系时，使用方法 6**：
 - `@dst_ip_handled_by_cpu[dst,cpu]` 表示某个 IPv4 目的地址在 3 秒窗口内被哪些 CPU 的 `net_rx_action()` 处理过
 - `@cpu_handled_dst_ip[cpu,dst]` 表示某个 CPU 的 `net_rx_action()` 在 3 秒窗口内涉及过哪些 IPv4 目的地址
+- `@src_ip_handled_by_cpu[src,cpu]` 表示某个 IPv4 源地址在 3 秒窗口内被哪些 CPU 的 `net_rx_action()` 处理过
+- `@cpu_handled_src_ip[cpu,src]` 表示某个 CPU 的 `net_rx_action()` 在 3 秒窗口内涉及过哪些 IPv4 源地址
 - 该方法只表达集合关系，map 的 value 固定为 `1`，不要把它解读为 skb 包数或 `net_rx_action()` 次数
 - 该方法基于 `tcp_v4_rcv`，覆盖 IPv4 TCP 入站路径，适合 Redis、HTTP、MySQL 等 TCP 服务压测；IPv6、UDP、隧道内层地址、XDP 提前转发/丢弃等路径不在这个脚本统计范围内
 - `net_rx_action()` 本身不认识 IP，脚本只是用 `@active[cpu]` 将 IPv4 TCP skb 解析结果关联到当前 CPU 的软中断窗口
@@ -963,6 +1000,8 @@ interval:s:5 {
 - `@tx_completion_dst_ip_handled_by_cpu[dst,cpu]` 表示发往某个 IPv4 TCP 目的地址的 skb，其 TX completion 在 3 秒窗口内由哪些 CPU 的 NAPI 清理过
 - `@cpu_handled_tx_completion_dst_ip[cpu,dst]` 表示某个 CPU 在 3 秒窗口内清理过哪些目的地址的 TX completion
 - `@tx_completion_dst_ip_skb_count[dst]` 和 `@tx_completion_dst_ip_cpu_skb_count[dst,cpu]` 是 TX completion 阶段的 skb 计数，不是线速包数
+- `@tx_completion_src_ip_handled_by_cpu[src,cpu]` 表示来自某个 IPv4 TCP 源地址的 skb，其 TX completion 在 3 秒窗口内由哪些 CPU 的 NAPI 清理过
+- `@cpu_handled_tx_completion_src_ip[cpu,src]` 表示某个 CPU 在 3 秒窗口内清理过哪些源地址的 TX completion
 - 默认脚本不解析 `arg0`，避免依赖 bpftrace 不一定可见的 mlx5e 私有 TX SQ 类型；如果需要继续拆 TX queue/channel，必须先确认目标机器有可用的驱动 BTF/调试信息，或按目标内核版本手工校验结构偏移，不建议放进通用脚本
 - 如果 bpftrace 报 `unknown struct/union`，通常说明还在运行旧版脚本或本机缺少 mlx5e 私有类型的 BTF 信息；先使用这里不解析 `arg0` 的默认版本
 - 该方法依赖 mlx5e 私有函数 `mlx5e_consume_skb`，适合 CX5/mlx5e；其他网卡驱动需要替换成对应 TX completion 释放 skb 的函数
