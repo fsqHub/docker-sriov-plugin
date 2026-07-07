@@ -8,6 +8,14 @@ set -euo pipefail
 #   --rule IP:QUEUE:CPU[:PORT]
 #   配置文件每行：IP QUEUE CPU [PORT]
 #
+# --mode server 是默认值，语义与 bind-ip-queue-cpu.sh 一致：
+#   RX：dst-ip(local/server) -> RX queue/RSS context -> IRQ CPU set
+#   TX：src-ip(local/server) -> TX queue -> XPS CPU set
+#
+# --mode client 用于客户端侧复用同一份配置，IP 表示远端 server IP：
+#   RX：src-ip(remote/server) -> RX queue/RSS context -> IRQ CPU set
+#   TX：dst-ip(remote/server) -> TX queue -> XPS CPU set
+#
 # 新增扩展：
 #   QUEUE 支持逗号和范围：5,6,8 或 5-8
 #   CPU   支持 CPU set：18-21 或 18,20-23
@@ -30,6 +38,7 @@ ENABLE_NTUPLE=1
 STRICT_IRQ=1
 SKIP_QUEUE_CHECK=0
 DELETE_RSS_CONTEXTS=0
+MODE="server"
 
 DEV=""
 CONFIG_FILE=""
@@ -57,6 +66,17 @@ Usage:
 
 Bind IPv4 TCP traffic for selected IPs to RX/TX queues and CPU ranges on a
 multi-queue netdev.
+
+Modes:
+  --mode server (default)
+    IP means local/server IP.
+    RX: dst-ip[:dst-port] -> RX queue/RSS context -> IRQ CPU set
+    TX: src-ip[:src-port] -> TX queue -> XPS CPU set
+
+  --mode client
+    IP means remote/server IP when this script runs on a client host.
+    RX: src-ip[:src-port] -> RX queue/RSS context -> IRQ CPU set
+    TX: dst-ip[:dst-port] -> TX queue -> XPS CPU set
 
 Compatibility:
   Old bind-ip-queue-cpu.sh rules still work:
@@ -103,6 +123,7 @@ Dependencies:
 
 Options:
   --dev DEV                       Target netdev, e.g. enp23s0f1np1
+  --mode server|client            Match direction mode (default: server)
   --rule IP:QUEUES:CPUS[:PORT]    Add one mapping rule; can be repeated
   --config FILE                   Read mapping rules from file
                                   Format: IP QUEUES CPUS [PORT]
@@ -125,9 +146,9 @@ Options:
   -h, --help                      Show this help
 
 Examples:
-  ./$SCRIPT_NAME --dev enp23s0f1np1 --rule 10.0.0.11:5:18:6379 --dry-run
+  ./$SCRIPT_NAME --dev enp23s0f1np1 --mode server --rule 10.0.0.11:5:18:6379 --dry-run
 
-  ./$SCRIPT_NAME --dev enp23s0f1np1 --rule 10.0.0.11:5-6:18-21:6379 --dry-run
+  ./$SCRIPT_NAME --dev enp23s0f1np1 --mode client --rule 10.0.0.11:5-6:18-21:6379 --dry-run
 
   ./$SCRIPT_NAME --dev enp23s0f1np1 --rule 10.0.0.11:5-6:18-19/20-21:6379
 
@@ -201,6 +222,11 @@ parse_args() {
 				shift
 				DEV=${1:-}
 				[ -n "$DEV" ] || die "--dev requires a value"
+				;;
+			--mode)
+				shift
+				MODE=${1:-}
+				[ -n "$MODE" ] || die "--mode requires a value"
 				;;
 			--rule)
 				shift
@@ -295,6 +321,17 @@ try:
 except Exception:
     raise SystemExit(1)
 PY
+}
+
+validate_mode() {
+	case "$MODE" in
+		server|client)
+			return 0
+			;;
+		*)
+			die "invalid --mode: $MODE; expected server or client"
+			;;
+	esac
 }
 
 expand_number_spec() {
@@ -754,31 +791,38 @@ configure_rx_rule() {
 	local count ctx
 	local queues=()
 	local cmd
+	local ip_field="dst-ip"
+	local port_field="dst-port"
+
+	if [ "$MODE" = "client" ]; then
+		ip_field="src-ip"
+		port_field="src-port"
+	fi
 
 	IFS=, read -r -a queues <<<"$queue_csv"
 	count=${#queues[@]}
 
 	if [ "$count" -eq 1 ]; then
-		cmd=(ethtool -N "$DEV" flow-type tcp4 dst-ip "$ip")
+		cmd=(ethtool -N "$DEV" flow-type tcp4 "$ip_field" "$ip")
 		if [ -n "$port" ]; then
-			cmd+=(dst-port "$port")
+			cmd+=("$port_field" "$port")
 		fi
 		cmd+=(action "${queues[0]}" loc "$loc")
 
-		echo "== Configuring RX ntuple: dst-ip $ip${port:+:$port} -> queue ${queues[0]} loc $loc =="
+		echo "== Configuring RX ntuple ($MODE): $ip_field $ip${port:+:$port} -> queue ${queues[0]} loc $loc =="
 		run_cmd "${cmd[@]}"
 		return 0
 	fi
 
 	ensure_rss_context "$queue_csv"
 	ctx="$RSS_CONTEXT_RESULT"
-	cmd=(ethtool -N "$DEV" flow-type tcp4 dst-ip "$ip")
+	cmd=(ethtool -N "$DEV" flow-type tcp4 "$ip_field" "$ip")
 	if [ -n "$port" ]; then
-		cmd+=(dst-port "$port")
+		cmd+=("$port_field" "$port")
 	fi
 	cmd+=(context "$ctx" loc "$loc")
 
-	echo "== Configuring RX ntuple: dst-ip $ip${port:+:$port} -> RSS context $ctx queues $queue_csv loc $loc =="
+	echo "== Configuring RX ntuple ($MODE): $ip_field $ip${port:+:$port} -> RSS context $ctx queues $queue_csv loc $loc =="
 	run_cmd "${cmd[@]}"
 }
 
@@ -835,20 +879,29 @@ configure_tx_rule() {
 	local pref="$4"
 	local queues=()
 	local cmd
+	local ip_field="src_ip"
+	local label="src-ip"
+	local port_field="src_port"
+
+	if [ "$MODE" = "client" ]; then
+		ip_field="dst_ip"
+		label="dst-ip"
+		port_field="dst_port"
+	fi
 
 	IFS=, read -r -a queues <<<"$queue_csv"
 	if [ "${#queues[@]}" -ne 1 ]; then
-		echo "== Skipping TX tc queue_mapping for src-ip $ip${port:+:$port}: multi-queue rule uses XPS on queues $queue_csv =="
+		echo "== Skipping TX tc queue_mapping for $label $ip${port:+:$port}: multi-queue rule uses XPS on queues $queue_csv =="
 		return 0
 	fi
 
-	cmd=(tc filter replace dev "$DEV" egress protocol ip pref "$pref" flower src_ip "$ip")
+	cmd=(tc filter replace dev "$DEV" egress protocol ip pref "$pref" flower "$ip_field" "$ip")
 	if [ -n "$port" ]; then
-		cmd+=(src_port "$port")
+		cmd+=("$port_field" "$port")
 	fi
 	cmd+=(ip_proto tcp action skbedit queue_mapping "${queues[0]}")
 
-	echo "== Configuring TX tc filter: src-ip $ip${port:+:$port} -> queue ${queues[0]} pref $pref =="
+	echo "== Configuring TX tc filter ($MODE): $label $ip${port:+:$port} -> queue ${queues[0]} pref $pref =="
 	run_cmd "${cmd[@]}"
 }
 
@@ -886,6 +939,10 @@ Verification hints:
 
 For multi-queue RX, verify that the device accepted the RSS context and that
 queue counters grow only within the intended queue range.
+
+Mode-specific match direction:
+  server: RX dst-ip / TX src-ip
+  client: RX src-ip / TX dst-ip
 EOF
 }
 
@@ -940,6 +997,7 @@ apply_rules() {
 main() {
 	parse_args "$@"
 
+	validate_mode
 	validate_number "$LOCATION_BASE" "location-base"
 	validate_number "$PREF_BASE" "pref-base"
 	validate_number "$RSS_CONTEXT_DRY_BASE" "rss-context-dry-base"
