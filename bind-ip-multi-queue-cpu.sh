@@ -39,6 +39,7 @@ STRICT_IRQ=1
 SKIP_QUEUE_CHECK=0
 DELETE_RSS_CONTEXTS=0
 MODE="server"
+RPS_FLOW_CNT=4096
 
 DEV=""
 CONFIG_FILE=""
@@ -47,13 +48,16 @@ PREF_BASE=500
 RSS_CONTEXT_DRY_BASE=9000
 RSS_CONTEXT_RESULT=""
 RSS_CONTEXT_STATE_FILE=""
+CLIENT_STATE_FILE=""
 
 RAW_RULES=()
 NORMALIZED_RULES=()
 IRQ_MAPS=()
 RSS_CONTEXT_MAPS=()
 RSS_CONTEXT_CLEANUP_RECORDS=()
+CONFIGURED_QUEUE_ORDER=()
 
+declare -A CLIENT_STATE_RECORDED=()
 declare -A QUEUE_CPUSET_BY_QUEUE=()
 declare -A IRQ_BOUND_BY_QUEUE=()
 declare -A XPS_SET_BY_QUEUE=()
@@ -106,7 +110,9 @@ Extensions:
     # queue 5 and queue 6 both bind to CPUs 18-21
 
 For each rule, the script can:
-  1. Disable RPS/RFS, unless --keep-rps is specified.
+  1. Server mode: disable RPS/RFS, unless --keep-rps is specified.
+     Client mode: configure RPS/RFS for selected RX queues, unless --keep-rps
+     is specified.
   2. Enable ethtool ntuple, unless --no-enable-ntuple is specified.
   3. Single queue RX: add/replace ntuple action QUEUE.
   4. Multi queue RX: create/reuse RSS context for QUEUES, then bind IP to it.
@@ -137,14 +143,19 @@ Options:
                                   by previous runs recorded in RSS state
   --rss-context-state FILE        State file for auto-created RSS contexts
                                   (default: /run/${SCRIPT_NAME%.sh}.DEV.rss-contexts)
+  --client-state FILE             State file used to restore client-mode sysfs
+                                  settings changed by this script
+                                  (default: /run/${SCRIPT_NAME%.sh}.DEV.client.state)
   --location-base N               Base location for ethtool ntuple rules (default: 500)
   --pref-base N                   Base pref for tc egress filters (default: 500)
   --rss-context-dry-base N        Synthetic context base in --dry-run (default: 9000)
+  --rps-flow-cnt N                Per RX queue rps_flow_cnt in client mode
+                                  when RPS/RFS is configured (default: 4096)
   --dry-run                       Print commands without executing
   --delete-rules                  Delete RX ntuple rules and TX egress filters
   --rx-only                       Configure RX side only
   --tx-only                       Configure TX side only
-  --keep-rps                      Do not disable RPS/RFS
+  --keep-rps                      Do not disable or configure RPS/RFS
   --no-enable-ntuple              Do not run ethtool -K DEV ntuple on
   --allow-missing-irq             Continue if RX queue IRQ cannot be discovered
   --skip-queue-check              Skip /sys queue existence checks; useful for dry-run
@@ -210,7 +221,7 @@ require_tools() {
 	if [ "$DRY_RUN" -eq 0 ]; then
 		tools+=(ethtool)
 		tools+=(tc)
-		if [ "$DELETE_RULES" -eq 0 ]; then
+		if [ "$DELETE_RULES" -eq 0 ] || [ "$MODE" = "client" ]; then
 			tools+=(sysctl)
 		fi
 	fi
@@ -261,6 +272,11 @@ parse_args() {
 				RSS_CONTEXT_STATE_FILE=${1:-}
 				[ -n "$RSS_CONTEXT_STATE_FILE" ] || die "--rss-context-state requires a value"
 				;;
+			--client-state)
+				shift
+				CLIENT_STATE_FILE=${1:-}
+				[ -n "$CLIENT_STATE_FILE" ] || die "--client-state requires a value"
+				;;
 			--location-base)
 				shift
 				LOCATION_BASE=${1:-}
@@ -275,6 +291,11 @@ parse_args() {
 				shift
 				RSS_CONTEXT_DRY_BASE=${1:-}
 				[ -n "$RSS_CONTEXT_DRY_BASE" ] || die "--rss-context-dry-base requires a value"
+				;;
+			--rps-flow-cnt)
+				shift
+				RPS_FLOW_CNT=${1:-}
+				[ -n "$RPS_FLOW_CNT" ] || die "--rps-flow-cnt requires a value"
 				;;
 			--dry-run)
 				DRY_RUN=1
@@ -487,6 +508,11 @@ set_default_rss_context_state_file() {
 	RSS_CONTEXT_STATE_FILE="/run/${SCRIPT_NAME%.sh}.${DEV}.rss-contexts"
 }
 
+set_default_client_state_file() {
+	[ -n "$CLIENT_STATE_FILE" ] && return 0
+	CLIENT_STATE_FILE="/run/${SCRIPT_NAME%.sh}.${DEV}.client.state"
+}
+
 check_queue_exists() {
 	local queue="$1"
 	[ "$SKIP_QUEUE_CHECK" -eq 0 ] || return 0
@@ -511,6 +537,9 @@ check_queue_cpu_conflict() {
 		die "queue $queue is mapped to multiple CPU ranges ($existing and $cpuset)"
 	fi
 
+	if [ -z "$existing" ]; then
+		CONFIGURED_QUEUE_ORDER+=("$queue")
+	fi
 	QUEUE_CPUSET_BY_QUEUE[$queue]="$cpuset"
 }
 
@@ -615,7 +644,6 @@ record_auto_rss_context() {
 }
 
 load_rss_context_state_records() {
-	[ "$DELETE_RSS_CONTEXTS" -eq 1 ] || return 0
 	[ -f "$RSS_CONTEXT_STATE_FILE" ] || return 0
 
 	local raw line queue_spec ctx queue_csv
@@ -640,6 +668,135 @@ clear_rss_context_state_file() {
 	rm -f -- "$RSS_CONTEXT_STATE_FILE"
 }
 
+prepare_client_state_file() {
+	[ "$MODE" = "client" ] || return 0
+	[ "$DRY_RUN" -eq 0 ] || return 0
+
+	local state_dir
+	state_dir=$(dirname -- "$CLIENT_STATE_FILE")
+	mkdir -p "$state_dir"
+	touch "$CLIENT_STATE_FILE"
+	[ -w "$CLIENT_STATE_FILE" ] || die "client state file is not writable: $CLIENT_STATE_FILE"
+}
+
+client_state_has_record() {
+	local kind="$1"
+	local key="$2"
+
+	[ -f "$CLIENT_STATE_FILE" ] || return 1
+	awk -F '\t' -v kind="$kind" -v key="$key" '$1 == kind && $2 == key { found = 1 } END { exit found ? 0 : 1 }' "$CLIENT_STATE_FILE"
+}
+
+record_client_state() {
+	local kind="$1"
+	local key="$2"
+	local value="$3"
+	local record_key="$kind|$key"
+
+	[ "$MODE" = "client" ] || return 0
+	[ "$DRY_RUN" -eq 0 ] || return 0
+	[ -z "${CLIENT_STATE_RECORDED[$record_key]:-}" ] || return 0
+	if client_state_has_record "$kind" "$key"; then
+		CLIENT_STATE_RECORDED[$record_key]=1
+		return 0
+	fi
+
+	prepare_client_state_file
+	printf '%s\t%s\t%s\n' "$kind" "$key" "$value" >>"$CLIENT_STATE_FILE"
+	CLIENT_STATE_RECORDED[$record_key]=1
+}
+
+record_file_state() {
+	local kind="$1"
+	local path="$2"
+	local value
+
+	[ "$MODE" = "client" ] || return 0
+	[ "$DRY_RUN" -eq 0 ] || return 0
+	[ -e "$path" ] || return 0
+	value=$(cat "$path")
+	record_client_state "$kind" "$path" "$value"
+}
+
+record_sysctl_state() {
+	local key="$1"
+	local value
+
+	[ "$MODE" = "client" ] || return 0
+	[ "$DRY_RUN" -eq 0 ] || return 0
+	value=$(sysctl -n "$key" 2>/dev/null || true)
+	[ -n "$value" ] || return 0
+	record_client_state sysctl "$key" "$value"
+}
+
+record_clsact_created() {
+	record_client_state clsact-created - 1
+}
+
+record_ntuple_state() {
+	local value
+
+	[ "$MODE" = "client" ] || return 0
+	[ "$DRY_RUN" -eq 0 ] || return 0
+	value=$(ethtool -k "$DEV" 2>/dev/null | awk '/^ntuple-filters:/ { print $2; exit }')
+	case "$value" in
+		on|off)
+			record_client_state ntuple "$DEV" "$value"
+			;;
+	esac
+}
+
+restore_client_state() {
+	[ "$MODE" = "client" ] || return 0
+	[ -f "$CLIENT_STATE_FILE" ] || return 0
+
+	local raw line kind key value
+	while IFS= read -r raw || [ -n "$raw" ]; do
+		line=${raw%%#*}
+		[ -n "$line" ] || continue
+		IFS=$'\t' read -r kind key value <<<"$line"
+		[ -n "${kind:-}" ] && [ -n "${key:-}" ] || die "invalid client state line: $raw"
+		case "$kind" in
+			irq|xps|rps-cpus|rps-flow-cnt)
+				if [ "$DRY_RUN" -eq 0 ] && [ ! -e "$key" ]; then
+					warn "client state target no longer exists, skip restore: $key"
+					continue
+				fi
+				run_shell "printf %s\\\\n $(printf '%q' "${value:-}") > $(printf '%q' "$key")"
+				;;
+			sysctl)
+				run_cmd sysctl -w "$key=${value:-}"
+				;;
+			ntuple)
+				case "${value:-}" in
+					on|off)
+						run_cmd ethtool -K "$DEV" ntuple "$value"
+						;;
+					*)
+						die "invalid ntuple state value: ${value:-}"
+						;;
+				esac
+				;;
+			clsact-created)
+				if [ "${value:-}" = "1" ]; then
+					if [ "$DRY_RUN" -eq 1 ] || tc qdisc show dev "$DEV" | grep -q 'clsact'; then
+						run_cmd tc qdisc del dev "$DEV" clsact
+					else
+						warn "clsact qdisc no longer exists on $DEV; skip delete"
+					fi
+				fi
+				;;
+			*)
+				die "unknown client state kind: $kind"
+				;;
+		esac
+	done <"$CLIENT_STATE_FILE"
+
+	if [ "$DRY_RUN" -eq 0 ]; then
+		rm -f -- "$CLIENT_STATE_FILE"
+	fi
+}
+
 normalize_rss_context_maps() {
 	local item queue_spec ctx queues_csv
 	for item in "${RSS_CONTEXT_MAPS[@]}"; do
@@ -648,7 +805,9 @@ normalize_rss_context_maps() {
 		validate_number "$ctx" "RSS context"
 		queues_csv=$(normalize_queue_spec_to_csv "$queue_spec")
 		RSS_CONTEXT_BY_QUEUES[$queues_csv]="$ctx"
-		remember_rss_context_cleanup_record "$queues_csv" "$ctx"
+		if [ "$DELETE_RSS_CONTEXTS" -eq 1 ]; then
+			remember_rss_context_cleanup_record "$queues_csv" "$ctx"
+		fi
 	done
 }
 
@@ -682,13 +841,61 @@ disable_rps_rfs() {
 	[ "$DO_RX" -eq 1 ] || return 0
 
 	echo "== Disabling RPS/RFS on $DEV =="
-	run_shell "for f in /sys/class/net/$DEV/queues/rx-*/rps_cpus; do [ -e \"\$f\" ] && echo 0 > \"\$f\"; done"
-	run_shell "for f in /sys/class/net/$DEV/queues/rx-*/rps_flow_cnt; do [ -e \"\$f\" ] && echo 0 > \"\$f\"; done"
+	if [ "$DRY_RUN" -eq 1 ]; then
+		run_shell "for f in /sys/class/net/$DEV/queues/rx-*/rps_cpus; do [ -e \"\$f\" ] && echo 0 > \"\$f\"; done"
+		run_shell "for f in /sys/class/net/$DEV/queues/rx-*/rps_flow_cnt; do [ -e \"\$f\" ] && echo 0 > \"\$f\"; done"
+	else
+		local f
+		for f in /sys/class/net/"$DEV"/queues/rx-*/rps_cpus; do
+			[ -e "$f" ] || continue
+			record_file_state rps-cpus "$f"
+			run_shell "printf %s\\\\n 0 > $(printf '%q' "$f")"
+		done
+		for f in /sys/class/net/"$DEV"/queues/rx-*/rps_flow_cnt; do
+			[ -e "$f" ] || continue
+			record_file_state rps-flow-cnt "$f"
+			run_shell "printf %s\\\\n 0 > $(printf '%q' "$f")"
+		done
+	fi
 	if [ -w /proc/sys/net/core/rps_sock_flow_entries ] || [ "$DRY_RUN" -eq 1 ]; then
+		record_sysctl_state net.core.rps_sock_flow_entries
 		run_cmd sysctl -w net.core.rps_sock_flow_entries=0
 	else
 		warn "cannot write /proc/sys/net/core/rps_sock_flow_entries; skip global RFS table reset"
 	fi
+}
+
+configure_client_rps_rfs() {
+	[ "$MODE" = "client" ] || return 0
+	[ "$DISABLE_RPS" -eq 1 ] || return 0
+	[ "$DO_RX" -eq 1 ] || return 0
+
+	local queue cpuset mask rps_cpus_file rps_flow_cnt_file total_entries=0
+
+	echo "== Configuring client RPS/RFS on $DEV =="
+	total_entries=$((${#CONFIGURED_QUEUE_ORDER[@]} * RPS_FLOW_CNT))
+	if [ "$total_entries" -gt 0 ]; then
+		record_sysctl_state net.core.rps_sock_flow_entries
+		run_cmd sysctl -w "net.core.rps_sock_flow_entries=$total_entries"
+	fi
+
+	for queue in "${CONFIGURED_QUEUE_ORDER[@]}"; do
+		cpuset=${QUEUE_CPUSET_BY_QUEUE[$queue]}
+		mask=$(cpu_set_to_mask "$cpuset")
+		rps_cpus_file="/sys/class/net/$DEV/queues/rx-$queue/rps_cpus"
+		rps_flow_cnt_file="/sys/class/net/$DEV/queues/rx-$queue/rps_flow_cnt"
+
+		if [ "$DRY_RUN" -eq 0 ]; then
+			[ -e "$rps_cpus_file" ] || die "RPS CPU mask file not found: $rps_cpus_file"
+			[ -e "$rps_flow_cnt_file" ] || die "RPS flow count file not found: $rps_flow_cnt_file"
+		fi
+
+		echo "== Configuring client RPS/RFS: RX queue $queue -> CPUs $cpuset mask $mask flow_cnt $RPS_FLOW_CNT =="
+		record_file_state rps-cpus "$rps_cpus_file"
+		run_shell "echo $mask > $rps_cpus_file"
+		record_file_state rps-flow-cnt "$rps_flow_cnt_file"
+		run_shell "echo $RPS_FLOW_CNT > $rps_flow_cnt_file"
+	done
 }
 
 enable_ntuple() {
@@ -696,6 +903,7 @@ enable_ntuple() {
 	[ "$ENABLE_NTUPLE" -eq 1 ] || return 0
 
 	echo "== Enabling ntuple on $DEV =="
+	record_ntuple_state
 	run_cmd ethtool -K "$DEV" ntuple on
 }
 
@@ -781,6 +989,7 @@ bind_irq_cpuset() {
 		die "IRQ affinity file not found: /proc/irq/$irq/smp_affinity_list"
 	fi
 	echo "== Binding RX queue $queue IRQ $irq to CPUs $cpuset =="
+	record_file_state irq "/proc/irq/$irq/smp_affinity_list"
 	run_shell "echo $cpuset > /proc/irq/$irq/smp_affinity_list"
 	IRQ_BOUND_BY_QUEUE[$queue]=1
 }
@@ -916,7 +1125,9 @@ delete_tx_egress_filters() {
 }
 
 delete_configured_rss_contexts() {
-	[ "$DELETE_RSS_CONTEXTS" -eq 1 ] || return 0
+	if [ "$DELETE_RSS_CONTEXTS" -ne 1 ] && [ "$MODE" != "client" ]; then
+		return 0
+	fi
 
 	load_rss_context_state_records
 
@@ -939,6 +1150,7 @@ delete_rules() {
 	delete_rx_ntuple_rules
 	delete_tx_egress_filters
 	delete_configured_rss_contexts
+	restore_client_state
 }
 
 ensure_clsact() {
@@ -952,6 +1164,7 @@ ensure_clsact() {
 	fi
 
 	if ! tc qdisc show dev "$DEV" | grep -q 'clsact'; then
+		record_clsact_created
 		run_cmd tc qdisc add dev "$DEV" clsact
 	fi
 }
@@ -1000,6 +1213,7 @@ configure_xps() {
 
 	mask=$(cpu_set_to_mask "$cpuset")
 	echo "== Setting XPS: TX queue $queue -> CPUs $cpuset mask $mask =="
+	record_file_state xps "/sys/class/net/$DEV/queues/tx-$queue/xps_cpus"
 	run_shell "echo $mask > /sys/class/net/$DEV/queues/tx-$queue/xps_cpus"
 	XPS_SET_BY_QUEUE[$queue]=1
 }
@@ -1031,7 +1245,9 @@ EOF
 }
 
 apply_rules() {
-	disable_rps_rfs
+	if [ "$MODE" != "client" ]; then
+		disable_rps_rfs
+	fi
 	enable_ntuple
 	if [ "$DO_RX" -eq 1 ]; then
 		delete_rx_ntuple_rules
@@ -1075,6 +1291,7 @@ apply_rules() {
 		index=$((index + 1))
 	done
 
+	configure_client_rps_rfs
 	print_verification_hint
 }
 
@@ -1085,10 +1302,12 @@ main() {
 	validate_number "$LOCATION_BASE" "location-base"
 	validate_number "$PREF_BASE" "pref-base"
 	validate_number "$RSS_CONTEXT_DRY_BASE" "rss-context-dry-base"
+	validate_number "$RPS_FLOW_CNT" "rps-flow-cnt"
 
 	load_config_rules
 	require_interface
 	set_default_rss_context_state_file
+	set_default_client_state_file
 	require_root
 	require_tools
 	normalize_rss_context_maps
