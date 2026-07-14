@@ -49,6 +49,7 @@ RSS_CONTEXT_DRY_BASE=9000
 RSS_CONTEXT_RESULT=""
 RSS_CONTEXT_STATE_FILE=""
 CLIENT_STATE_FILE=""
+LOG_FILE=""
 
 RAW_RULES=()
 NORMALIZED_RULES=()
@@ -146,6 +147,7 @@ Options:
   --client-state FILE             State file used to restore client-mode sysfs
                                   settings changed by this script
                                   (default: /run/${SCRIPT_NAME%.sh}.DEV.client.state)
+  --log-file FILE                 Write run details to FILE instead of terminal
   --location-base N               Base location for ethtool ntuple rules (default: 500)
   --pref-base N                   Base pref for tc egress filters (default: 500)
   --rss-context-dry-base N        Synthetic context base in --dry-run (default: 9000)
@@ -182,6 +184,17 @@ die() {
 
 warn() {
 	echo "warning: $*" >&2
+}
+
+setup_log_file() {
+	[ -n "$LOG_FILE" ] || return 0
+
+	local log_dir
+	log_dir=$(dirname -- "$LOG_FILE")
+	mkdir -p "$log_dir"
+	: >"$LOG_FILE" || die "cannot write log file: $LOG_FILE"
+	exec >"$LOG_FILE" 2>&1
+	echo "== Writing run details to $LOG_FILE =="
 }
 
 print_cmd() {
@@ -276,6 +289,11 @@ parse_args() {
 				shift
 				CLIENT_STATE_FILE=${1:-}
 				[ -n "$CLIENT_STATE_FILE" ] || die "--client-state requires a value"
+				;;
+			--log-file)
+				shift
+				LOG_FILE=${1:-}
+				[ -n "$LOG_FILE" ] || die "--log-file requires a value"
 				;;
 			--location-base)
 				shift
@@ -1297,6 +1315,7 @@ apply_rules() {
 
 main() {
 	parse_args "$@"
+	setup_log_file
 
 	validate_mode
 	validate_number "$LOCATION_BASE" "location-base"
